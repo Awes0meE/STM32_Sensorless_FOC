@@ -1,6 +1,11 @@
 {
     "folders": [
         {
+            "name": "STM32F4_DRV8301_code",
+            "path": ".."
+        },
+        {
+            "name": "Keil_Project",
             "path": "."
         }
     ],
