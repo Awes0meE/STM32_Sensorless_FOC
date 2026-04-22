@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+
+<Workspace>
+  <ConfigDictionary>
+    
+  <CurrentConfigs><Project>stm32_drv8301/Debug</Project></CurrentConfigs></ConfigDictionary>
+  <Desktop>
+    <Static>
+      <Build>
+        <PreferedWindows>
+          
+          
+          
+          
+        <Position>3</Position><ScreenPosX>0</ScreenPosX><ScreenPosY>0</ScreenPosY><Windows/></PreferedWindows>
+        
+        
+        
+        
+      <ColumnWidth0>20</ColumnWidth0><ColumnWidth1>888</ColumnWidth1><ColumnWidth2>237</ColumnWidth2><ColumnWidth3>59</ColumnWidth3></Build>
+      <Workspace>
+        <ColumnWidths>
+          
+          
+          
+          
+        <Column0>247</Column0><Column1>27</Column1><Column2>27</Column2><Column3>27</Column3></ColumnWidths>
+      <PreferedWindows><Position>1</Position><ScreenPosX>0</ScreenPosX><ScreenPosY>0</ScreenPosY><Windows/></PreferedWindows></Workspace>
+      <Debug-Log>
+        
+        
+      <PreferedWindows><Position>3</Position><ScreenPosX>0</ScreenPosX><ScreenPosY>0</ScreenPosY><Windows><Window><Factory>Build</Factory></Window></Windows></PreferedWindows><ColumnWidth0>20</ColumnWidth0><ColumnWidth1>1621</ColumnWidth1></Debug-Log>
+      <Select-Ambiguous-Definitions>
+        
+        
+        
+      <PreferedWindows><Position>3</Position><ScreenPosX>0</ScreenPosX><ScreenPosY>0</ScreenPosY><Windows/></PreferedWindows><ColumnWidth0>580</ColumnWidth0><ColumnWidth1>82</ColumnWidth1><ColumnWidth2>994</ColumnWidth2></Select-Ambiguous-Definitions>
+      <TerminalIO/>
+    <Find-All-Declarations><PreferedWindows><Position>3</Position><ScreenPosX>0</ScreenPosX><ScreenPosY>0</ScreenPosY><Windows><Window><Factory>Build</Factory></Window><Window><Factory>Debug-Log</Factory></Window></Windows></PreferedWindows><ColumnWidth0>580</ColumnWidth0><ColumnWidth1>82</ColumnWidth1><ColumnWidth2>994</ColumnWidth2></Find-All-Declarations><Find-All-References><PreferedWindows><Position>3</Position><ScreenPosX>0</ScreenPosX><ScreenPosY>0</ScreenPosY><Windows/></PreferedWindows><ColumnWidth0>580</ColumnWidth0><ColumnWidth1>82</ColumnWidth1><ColumnWidth2>994</ColumnWidth2></Find-All-References></Static>
+    <Windows>
+      
+      
+    <Wnd2><Tabs><Tab><Identity>TabID-8451-19387</Identity><TabName>Workspace</TabName><Factory>Workspace</Factory><Session><NodeDict><ExpandedNode>stm32_drv8301</ExpandedNode><ExpandedNode>stm32_drv8301/Libraries</ExpandedNode><ExpandedNode>stm32_drv8301/motor</ExpandedNode><ExpandedNode>stm32_drv8301/readme</ExpandedNode><ExpandedNode>stm32_drv8301/user</ExpandedNode><ExpandedNode>stm32_drv8301/user/pc_communication</ExpandedNode></NodeDict></Session></Tab></Tabs><SelectedTab>0</SelectedTab></Wnd2><Wnd3><Tabs><Tab><Identity>TabID-28586-24686</Identity><TabName>Build</TabName><Factory>Build</Factory><Session/></Tab><Tab><Identity>TabID-20052-61</Identity><TabName>Debug Log</TabName><Factory>Debug-Log</Factory><Session/></Tab></Tabs><SelectedTab>0</SelectedTab></Wnd3></Windows>
+    <Editor>
+      
+      
+      
+      
+    <Pane><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\motor\adc.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>39</SelStart><SelEnd>39</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\oled_display.h</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>0</SelStart><SelEnd>0</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\oled_font.h</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>0</SelStart><SelEnd>0</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\board_config.h</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>0</SelStart><SelEnd>0</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\readme.txt</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>0</SelStart><SelEnd>0</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\motor\drv8301.h</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>0</SelStart><SelEnd>0</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\motor\foc_define_parameter.h</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>42</SelStart><SelEnd>42</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\motor\hall_sensor.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>47</SelStart><SelEnd>47</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\motor\speed_pid.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>48</SelStart><SelEnd>48</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\board_config.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>40</SelStart><SelEnd>40</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\exti.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>45</SelStart><SelEnd>45</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\main.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>47</SelStart><SelEnd>47</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\oled.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>0</SelStart><SelEnd>0</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\oled_display.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>36</SelStart><SelEnd>36</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\oled_font.c</Filename><XPos>0</XPos><YPos>330</YPos><SelStart>0</SelStart><SelEnd>0</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\pc_communication_init.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>43</SelStart><SelEnd>43</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\stm32f4xx_it.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>0</SelStart><SelEnd>0</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\Libraries\STM32F4xx_StdPeriph_Driver\src\misc.c</Filename><XPos>0</XPos><YPos>48</YPos><SelStart>0</SelStart><SelEnd>0</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\Libraries\STM32F4xx_StdPeriph_Driver\src\stm32f4xx_dfsdm.c</Filename><XPos>0</XPos><YPos>24</YPos><SelStart>0</SelStart><SelEnd>0</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\user\pc_communication\src\pc_communication.a</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>0</SelStart><SelEnd>0</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\motor\drv8301.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>36</SelStart><SelEnd>36</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\motor\L_identification_wrapper.c</Filename><XPos>0</XPos><YPos>3</YPos><SelStart>47</SelStart><SelEnd>47</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\motor\stm32_ekf_wrapper.c</Filename><XPos>0</XPos><YPos>174</YPos><SelStart>44</SelStart><SelEnd>44</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\motor\low_task.c</Filename><XPos>0</XPos><YPos>0</YPos><SelStart>42</SelStart><SelEnd>42</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\motor\R_flux_identification_wrapper.c</Filename><XPos>0</XPos><YPos>96</YPos><SelStart>46</SelStart><SelEnd>46</SelEnd></Tab><Tab><Factory>TextEditor</Factory><Filename>$WS_DIR$\motor\foc_algorithm.c</Filename><XPos>0</XPos><YPos>309</YPos><SelStart>42</SelStart><SelEnd>42</SelEnd></Tab><ActiveTab>25</ActiveTab></Pane><ActivePane>0</ActivePane><Sizes><Pane><X>1000000</X><Y>1000000</Y></Pane></Sizes><SplitMode>1</SplitMode></Editor>
+    <Positions>
+      
+      
+      
+      
+      
+    <Top><Row0><Sizes><Toolbar-015fb7c0><key>iaridepm.enu1</key></Toolbar-015fb7c0></Sizes></Row0></Top><Left><Row0><Sizes><Wnd2><Rect><Top>-2</Top><Left>-2</Left><Bottom>558</Bottom><Right>338</Right><x>-2</x><y>-2</y><xscreen>160</xscreen><yscreen>156</yscreen><sizeHorzCX>119048</sizeHorzCX><sizeHorzCY>206077</sizeHorzCY><sizeVertCX>252976</sizeVertCX><sizeVertCY>739762</sizeVertCY></Rect></Wnd2></Sizes></Row0></Left><Right><Row0><Sizes/></Row0></Right><Bottom><Row0><Sizes><Wnd3><Rect><Top>-2</Top><Left>-2</Left><Bottom>154</Bottom><Right>1346</Right><x>-2</x><y>-2</y><xscreen>1348</xscreen><yscreen>156</yscreen><sizeHorzCX>1002976</sizeHorzCX><sizeHorzCY>206077</sizeHorzCY><sizeVertCX>119048</sizeVertCX><sizeVertCY>206077</sizeVertCY></Rect></Wnd3></Sizes></Row0></Bottom><Float><Sizes/></Float></Positions>
+  </Desktop>
+</Workspace>
+
+
