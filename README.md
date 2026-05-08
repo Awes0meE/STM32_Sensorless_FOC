@@ -70,6 +70,31 @@ Keil_Project/stm32_drv8301_keil.uvprojx
 
 命令行环境可用 `arm-none-eabi-gcc -fsyntax-only` 做轻量语法检查；最终烧录前仍建议用 Keil/IAR 做完整构建。
 
+## VSCode + ST-Link
+
+仓库已经补齐 VSCode 下的 GCC 编译、ST-Link 下载和调试配置，默认使用本机：
+
+```text
+D:/ST/STM32CubeCLT_1.21.0
+```
+
+如果工具链装在别的位置，构建脚本可通过环境变量 `STM32CUBECLT_PATH` 覆盖；调试配置则需要同步修改 `.vscode/launch.json` 里的 ST 工具路径。
+
+VSCode 建议安装：
+
+- Microsoft C/C++：`ms-vscode.cpptools`
+- Cortex-Debug：`marus25.cortex-debug`
+
+常用任务：
+
+- `Build firmware`：生成 `build/stm32_drv8301.elf/.hex/.bin`
+- `Probe ST-Link`：枚举 ST-Link 探针
+- `Flash firmware (ST-Link)`：编译后用 SWD 下载并复位
+- `Erase chip (ST-Link)`：整片擦除
+- `Reset target (ST-Link)`：复位目标板
+
+调试入口在 VSCode Run and Debug 里选择 `Debug firmware (ST-Link)`。下载前请确认压缩机电源限流，且不要让压缩机在无人看管状态下启动。
+
 ## 编码约定
 
 源码和文档统一使用 UTF-8。仓库已用 `.editorconfig` 和 `.gitattributes` 固定编码与换行规则，避免中文注释在 GitHub 或现代编辑器中显示为乱码。

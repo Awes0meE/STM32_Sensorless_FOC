@@ -1,0 +1,28 @@
+{
+  "version": 4,
+  "configurations": [
+    {
+      "name": "STM32F446 GCC",
+      "compilerPath": "D:/ST/STM32CubeCLT_1.21.0/GNU-tools-for-STM32/bin/arm-none-eabi-gcc.exe",
+      "intelliSenseMode": "windows-gcc-arm",
+      "cStandard": "c99",
+      "cppStandard": "c++17",
+      "defines": [
+        "USE_STDPERIPH_DRIVER",
+        "STM32F446xx",
+        "ARM_MATH_CM4",
+        "SIMULINK_USE_ARM_MATH",
+        "__FPU_PRESENT=1"
+      ],
+      "includePath": [
+        "${workspaceFolder}/user",
+        "${workspaceFolder}/motor",
+        "${workspaceFolder}/user/pc_communication/inc",
+        "${workspaceFolder}/Libraries",
+        "${workspaceFolder}/Libraries/CMSIS/Include",
+        "${workspaceFolder}/Libraries/CMSIS/Device/ST/STM32F4xx/Include",
+        "${workspaceFolder}/Libraries/STM32F4xx_StdPeriph_Driver/inc"
+      ]
+    }
+  ]
+}

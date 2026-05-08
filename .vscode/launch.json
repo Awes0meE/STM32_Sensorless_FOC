@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug firmware (ST-Link)",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/stm32_drv8301.elf",
+      "request": "launch",
+      "type": "cortex-debug",
+      "servertype": "stlink",
+      "device": "STM32F446RETx",
+      "interface": "swd",
+      "runToEntryPoint": "main",
+      "preLaunchTask": "Build firmware",
+      "armToolchainPath": "D:/ST/STM32CubeCLT_1.21.0/GNU-tools-for-STM32/bin",
+      "gdbPath": "D:/ST/STM32CubeCLT_1.21.0/GNU-tools-for-STM32/bin/arm-none-eabi-gdb.exe",
+      "serverpath": "D:/ST/STM32CubeCLT_1.21.0/STLink-gdb-server/bin/ST-LINK_gdbserver.exe",
+      "stm32cubeprogrammer": "D:/ST/STM32CubeCLT_1.21.0/STM32CubeProgrammer/bin",
+      "svdFile": "D:/ST/STM32CubeCLT_1.21.0/STMicroelectronics_CMSIS_SVD/STM32F446.svd"
+    }
+  ]
+}

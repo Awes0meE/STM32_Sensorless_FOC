@@ -35,7 +35,10 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "stm32f4xx.h"
+#include "board_config.h"
+#if PC_COMMUNICATION_ENABLE
 #include "usbd_cdc_core_loopback.h"
+#endif
 /* Exported types ------------------------------------------------------------*/
 /* Exported constants --------------------------------------------------------*/
 /* Exported macro ------------------------------------------------------------*/
@@ -50,7 +53,9 @@ void SVC_Handler(void);
 void DebugMon_Handler(void);
 void PendSV_Handler(void);
 void SysTick_Handler(void);
+#if PC_COMMUNICATION_ENABLE
 void OTG_FS_IRQHandler(void);
+#endif
 #ifdef __cplusplus
 }
 #endif

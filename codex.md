@@ -85,6 +85,10 @@
 - 已新增“压缩机安全启动版本”：默认 1800 rpm、最高 3000 rpm，12V 母线窗口、相电流软件保护、12s 启动检查、2s 堵转确认、10s 重启等待。
 - 已将 6MD030Z 初始 FOC 参数写入 `motor/foc_define_parameter.h`：`Rs=0.376Ω`、`Ls=0.20mH`、`flux=0.00650Wb`，这些值是启动初值，不是最终标定。
 - 已把 DRV8301 硬件过流阈值从 `OC_ADJ_SET_18` 降为 `OC_ADJ_SET_8`，更适合 12V 小压缩机安全试机。
+- 已打通 VSCode + STM32CubeCLT + ST-Link 链路：`.vscode/tasks.json`、`.vscode/launch.json`、`.vscode/c_cpp_properties.json`、`tools/vscode-build.ps1`。
+- VSCode 构建默认使用 `D:\ST\STM32CubeCLT_1.21.0`，也可通过环境变量 `STM32CUBECLT_PATH` 覆盖构建脚本路径；调试配置路径在 `.vscode/launch.json` 中维护。
+- GCC 构建产物位于 `build/stm32_drv8301.elf/.hex/.bin`，`build/` 已由 `.gitignore` 忽略。
+- 为了让 PC 通信关闭时能 GCC 链接，`user/stm32f4xx_it.*` 中的 USB OTG handler 已按 `PC_COMMUNICATION_ENABLE` 包裹；GCC 专用 newlib stub 位于 `tools/gcc_syscalls.c`。
 
 ## 不依赖上位机后的操作方式
 
@@ -110,4 +114,5 @@
 - 每次准备推 GitHub 前，至少运行：
   - `git diff --check`
   - 针对改动 C 文件的 `arm-none-eabi-gcc -fsyntax-only` 语法检查，或在 Keil/IAR 中完整构建。
+- VSCode/GCC 链路改动后运行 `powershell -NoProfile -ExecutionPolicy Bypass -File tools/vscode-build.ps1 build`。
 - 不要默认恢复或删除用户已有工程文件、备份文件、输出文件；清理前先确认范围。

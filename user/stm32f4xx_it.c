@@ -41,8 +41,10 @@
 /* Private variables ---------------------------------------------------------*/
 /* Private function prototypes -----------------------------------------------*/
 /* Private functions ---------------------------------------------------------*/
+#if PC_COMMUNICATION_ENABLE
 extern USB_OTG_CORE_HANDLE USB_OTG_dev;
 extern uint32_t USBD_OTG_ISR_Handler(USB_OTG_CORE_HANDLE * pdev);
+#endif
 extern __IO uint32_t data_sent;
 /******************************************************************************/
 /*            Cortex-M4 Processor Exceptions Handlers                         */
@@ -150,12 +152,14 @@ void TIM1_UP_TIM10_IRQHandler(void)
   TIM_ClearFlag(PWM_TIM, TIM_FLAG_Update);
 }
 
+#if PC_COMMUNICATION_ENABLE
 void OTG_FS_IRQHandler(void)
 {
   
   USBD_OTG_ISR_Handler(&USB_OTG_dev);
 
 }
+#endif
 
 /******************************************************************************/
 /*                 STM32F4xx Peripherals Interrupt Handlers                   */
