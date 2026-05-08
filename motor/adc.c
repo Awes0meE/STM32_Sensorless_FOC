@@ -32,10 +32,16 @@ extern float flux;
 
 static uint16_t compressor_vbus_fault_cnt = 0;
 static uint16_t compressor_current_fault_cnt = 0;
+static float compressor_open_loop_speed_hz = COMPRESSOR_OPEN_LOOP_START_HZ;
 
 static float adc_absf(float value)
 {
   return (value >= 0.0f) ? value : -value;
+}
+
+static void adc_update_vbus_from_jdr(void)
+{
+  Vbus = (float)ADC1->JDR1 * VBUS_CONVERSION_FACTOR;
 }
 
 static float compressor_limit_iq(float value)
@@ -49,6 +55,24 @@ static float compressor_limit_iq(float value)
     return -COMPRESSOR_REGEN_IQ_LIMIT_A;
   }
   return value;
+}
+
+static void compressor_update_open_loop_start(void)
+{
+  if((motor_start_stop != 1) || (compressor_state == COMPRESSOR_STATE_FAULT))
+  {
+    compressor_open_loop_speed_hz = COMPRESSOR_OPEN_LOOP_START_HZ;
+  }
+  else if(compressor_open_loop_speed_hz < COMPRESSOR_OPEN_LOOP_MAX_HZ)
+  {
+    compressor_open_loop_speed_hz += COMPRESSOR_OPEN_LOOP_RAMP_HZ_S * FOC_PERIOD;
+    if(compressor_open_loop_speed_hz > COMPRESSOR_OPEN_LOOP_MAX_HZ)
+    {
+      compressor_open_loop_speed_hz = COMPRESSOR_OPEN_LOOP_MAX_HZ;
+    }
+  }
+
+  hall_angle_add = 2.0f * PI * compressor_open_loop_speed_hz * FOC_PERIOD;
 }
 
 static void compressor_adc_safety_check(void)
@@ -99,6 +123,7 @@ static void compressor_adc_safety_check(void)
 
 void get_offset(uint32_t *a_offset,uint32_t *b_offset)
 {
+  adc_update_vbus_from_jdr();
   if(get_offset_sample_cnt<128)
   {
     *a_offset += ADC1->JDR2;
@@ -117,12 +142,10 @@ void get_offset(uint32_t *a_offset,uint32_t *b_offset)
 
 void motor_run(void)
 {
-  float vbus_temp;
   double ia_temp,ib_temp;
-  vbus_temp = (float)(ADC1->JDR1);                                //得到母线电压 adc转换值
+  adc_update_vbus_from_jdr();
   ia_temp = (int16_t)((int16_t)A_offset - (int16_t)ADC1->JDR2);   //得到A相电流 adc转换值
   ib_temp = (int16_t)((int16_t)B_offset - (int16_t)ADC1->JDR3);   //得到B相电流 adc转换值
-  Vbus = vbus_temp*VBUS_CONVERSION_FACTOR;                        //通过电压转换因子（通过分压电阻得到）把adc转换值 转化为 真实电压
   Ia = ia_temp*SAMPLE_CURR_CON_FACTOR;                            //通过电流转换因子（通过采样电阻和运算放大倍数得到）把adc采样值转化为真实电流值
   Ib = ib_temp*SAMPLE_CURR_CON_FACTOR;                            //通过电流转换因子（通过采样电阻和运算放大倍数得到）把adc采样值转化为真实电流值
   Ic = -Ia-Ib;                                                    //基于基尔霍夫电流定律，根据AB相电流去计算C相电流
@@ -131,6 +154,7 @@ void motor_run(void)
   Ic_test = Ic;
 
   int_test2 = ADC1ConvertedValue[0];
+  compressor_update_open_loop_start();
   compressor_adc_safety_check();
   if(compressor_state == COMPRESSOR_STATE_FAULT)
   {
@@ -188,20 +212,33 @@ void motor_run(void)
 
 #ifdef  SENSORLESS_FOC_SELECT            //通过条件编译选择无感FOC运行
 
+#if COMPRESSOR_FORCE_START_ENABLE
+  if(FOC_Output.EKF[2] <= SPEED_LOOP_CLOSE_RAD_S)
+  {
+    FOC_Input.Id_ref = 0.0f;
+    FOC_Input.Iq_ref = compressor_limit_iq(Iq_ref);
+    Speed_Pid.I_Sum = Iq_ref;
+    FOC_Input.theta = hall_angle;
+    FOC_Input.speed_fdk = 2.0f * PI * compressor_open_loop_speed_hz;
+  }
+  else
+#endif
   if(FOC_Output.EKF[2]>SPEED_LOOP_CLOSE_RAD_S)      //无感方式运行，状态观测器得到角度和速度信息
   {
     FOC_Input.Id_ref = 0.0f;
     Speed_Fdk = FOC_Output.EKF[2];
     FOC_Input.Iq_ref = compressor_limit_iq(Speed_Pid_Out);
+    FOC_Input.theta = FOC_Output.EKF[3];
+    FOC_Input.speed_fdk = FOC_Output.EKF[2];
   }
   else
   {
     FOC_Input.Id_ref = 0.0f;
     FOC_Input.Iq_ref = compressor_limit_iq(Iq_ref);
     Speed_Pid.I_Sum = Iq_ref;
+    FOC_Input.theta = FOC_Output.EKF[3];
+    FOC_Input.speed_fdk = FOC_Output.EKF[2];
   }
-  FOC_Input.theta = FOC_Output.EKF[3];
-  FOC_Input.speed_fdk = FOC_Output.EKF[2];
 
 #endif
 
