@@ -113,7 +113,7 @@ void hard_init(void)
   //TIM_Cmd(COMMUNICATION_TASK_TIM, ENABLE);
   //communication task timer config end
 
-  //DRV8301 Òı½Å  config start
+  //DRV8301 å¼•è„š  config start
   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
   GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
@@ -152,14 +152,14 @@ void hard_init(void)
   GPIO_InitStructure.GPIO_Pin = DRV8301_SPIx_MISO_PIN;
   GPIO_Init(DRV8301_SPIx_MISO_GPIO_PORT, &GPIO_InitStructure);
 
-  //DRV8301  SPI  Òı½Å ³õÊ¼µçÆ½
+  //DRV8301  SPI  å¼•è„š åˆå§‹ç”µå¹³
   GPIO_SetBits(DRV8301_ENGATE_GPIO_PORT,DRV8301_ENGATE_PIN);
   GPIO_SetBits(DRV8301_SPIx_CS_GPIO_PORT,DRV8301_SPIx_CS_PIN);
   GPIO_ResetBits(DRV8301_SPIx_SCK_GPIO_PORT,DRV8301_SPIx_SCK_PIN);
   GPIO_ResetBits(DRV8301_SPIx_MOSI_GPIO_PORT,DRV8301_SPIx_MOSI_PIN);
-  //DRV8301 Òı½Å  config end
+  //DRV8301 å¼•è„š  config end
 
-  //OLEDÏÔÊ¾ÆÁ Òı½Å  config start
+  //OLEDæ˜¾ç¤ºå± å¼•è„š  config start
   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
   GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
   GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
@@ -182,12 +182,12 @@ void hard_init(void)
   GPIO_Init(OLED_CS_GPIO_PORT, &GPIO_InitStructure);
   GPIO_ResetBits(OLED_RESET_GPIO_PORT,OLED_RESET_PIN);
   GPIO_ResetBits(OLED_CS_GPIO_PORT,OLED_CS_PIN);
-  //OLEDÏÔÊ¾ÆÁ Òı½Å  config end
+  //OLEDæ˜¾ç¤ºå± å¼•è„š  config end
 
-  //LEDÌáÊ¾µÆ Òı½Å  config start
+  //LEDæç¤ºç¯ å¼•è„š  config start
   GPIO_InitStructure.GPIO_Pin =  USER_LED_PIN;
   GPIO_Init(USER_LED_GPIO_PORT, &GPIO_InitStructure);
-  //LEDÌáÊ¾µÆ Òı½Å  config end
+  //LEDæç¤ºç¯ å¼•è„š  config end
 
   //PWM  config start
   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
@@ -366,7 +366,7 @@ void hard_init(void)
   ADC_SoftwareStartConv(SAMPLE_ADC);
   //ADC  config end
 
-  //°´¼ü  config start
+  //æŒ‰é”®  config start
   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
   GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
@@ -389,13 +389,13 @@ void hard_init(void)
   EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Falling;
   EXTI_InitStructure.EXTI_LineCmd = ENABLE;
   EXTI_Init(&EXTI_InitStructure);
-  //°´¼ü  config end
+  //æŒ‰é”®  config end
 
-  //USBÍ¨Ñ¶ÅäÖÃ start
+  //USBé€šè®¯é…ç½® start
   //communication_init();
-  //USBÍ¨Ñ¶ÅäÖÃ end
+  //USBé€šè®¯é…ç½® end
 
-  //ÖĞ¶ÏÓÅÏÈ¼¶ÉèÖÃ start
+  //ä¸­æ–­ä¼˜å…ˆçº§è®¾ç½® start
   NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
   /*
   NVIC_InitStructure.NVIC_IRQChannel = TIM1_UP_TIM10_IRQn;
@@ -454,7 +454,7 @@ void hard_init(void)
   NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&NVIC_InitStructure);
 	#endif
-  //ÖĞ¶ÏÓÅÏÈ¼¶ÉèÖÃ end
+  //ä¸­æ–­ä¼˜å…ˆçº§è®¾ç½® end
 }
 
 

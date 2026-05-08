@@ -77,6 +77,7 @@
 - 已执行 `git diff --check`，通过；仅有 `adc.h` 和 `board_config.h` 的 CRLF 提示。
 - 未做完整 Keil/IAR 构建，因为命令行环境未发现 `UV4/armcc/iarbuild`。
 - 已新增根目录 `README.md` 作为 GitHub/新人入口；长期细节仍以本文件为准。
+- 已将 `user/` 和 `motor/` 中原 GBK/CP1252 编码的源码注释维护为 UTF-8，并新增 `.editorconfig` 声明后续源码按 UTF-8 编辑。
 
 ## 不依赖上位机后的操作方式
 
@@ -98,6 +99,7 @@
 
 - 修改硬件相关代码时，优先查 `Netlist_Sheet_2026-05-09.enet` 与 `user/board_config.h` 是否一致。
 - 改动 motor control 参数时，同步更新本文件“当前参数快照”和“适配日志”。
+- 新增或修改源码注释时使用 UTF-8；不要再用 GBK 保存 `user/`、`motor/` 下的 C/H 文件。
 - 每次准备推 GitHub 前，至少运行：
   - `git diff --check`
   - 针对改动 C 文件的 `arm-none-eabi-gcc -fsyntax-only` 语法检查，或在 Keil/IAR 中完整构建。

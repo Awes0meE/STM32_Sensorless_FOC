@@ -1,0 +1,6 @@
+/.editorconfig text eol=lf
+/.gitattributes text eol=lf
+*.c text eol=crlf
+*.h text eol=crlf
+*.md text eol=lf
+*.txt text eol=lf

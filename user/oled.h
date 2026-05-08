@@ -14,10 +14,10 @@
 
 #define OLED_DC_Clr() GPIO_ResetBits(OLED_DC_GPIO_PORT,OLED_DC_PIN)//DC
 #define OLED_DC_Set() GPIO_SetBits(OLED_DC_GPIO_PORT,OLED_DC_PIN)
- 		     
 
-#define OLED_CMD  0	//Ğ´ÃüÁî
-#define OLED_DATA 1	//Ğ´Êı¾İ
+
+#define OLED_CMD  0	//å†™å‘½ä»¤
+#define OLED_DATA 1	//å†™æ•°æ®
 #define SIZE 16
 #define Max_Column	128
 #define Max_Row		64
