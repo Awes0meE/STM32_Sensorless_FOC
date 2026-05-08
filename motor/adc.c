@@ -1,5 +1,5 @@
 /**********************************
-   
+
 **********************************/
 #include "main.h"
 #include "adc.h"
@@ -62,9 +62,9 @@ void motor_run(void)
   Ia_test = Ia;
   Ib_test = Ib;
   Ic_test = Ic;
-  
+
   int_test2 = ADC1ConvertedValue[0];
-  
+
   if(speed_close_loop_flag==0)         //速度环闭环切换控制，电机刚启动时速度环不闭环
   {                                    //并且电流参考值缓慢增加（防冲击），速度达到一定值
     if((Iq_ref<MOTOR_STARTUP_CURRENT)) //速度切入闭环
@@ -90,12 +90,12 @@ void motor_run(void)
       }
     }
   }
-  
-  
+
+
   float_test3 = Speed_Ref*2.0f*PI;
-  
-//切换有感或无感方式运行，也就是选择从无感状态观测器方式得到角度和速度信息还是从有感方式得到角度和速度信息  
-#ifdef  HALL_FOC_SELECT            //通过条件编译选择有感FOC运行，  
+
+//切换有感或无感方式运行，也就是选择从无感状态观测器方式得到角度和速度信息还是从有感方式得到角度和速度信息
+#ifdef  HALL_FOC_SELECT            //通过条件编译选择有感FOC运行，
 
   if((hall_speed*2.0f*PI)>SPEED_LOOP_CLOSE_RAD_S)     //有感方式运行，霍尔传感器得到角度和速度信息
   {
@@ -111,11 +111,11 @@ void motor_run(void)
   }
   FOC_Input.theta = hall_angle;
   FOC_Input.speed_fdk = hall_speed*2.0f*PI;
-  
+
 #endif
-  
+
 #ifdef  SENSORLESS_FOC_SELECT            //通过条件编译选择无感FOC运行
-  
+
   if(FOC_Output.EKF[2]>SPEED_LOOP_CLOSE_RAD_S)      //无感方式运行，状态观测器得到角度和速度信息
   {
     FOC_Input.Id_ref = 0.0f;
@@ -130,24 +130,24 @@ void motor_run(void)
   }
   FOC_Input.theta = FOC_Output.EKF[3];
   FOC_Input.speed_fdk = FOC_Output.EKF[2];
-  
-#endif  
 
-  
-  
+#endif
+
+
+
   EKF_Hz = FOC_Output.EKF[2]/(2.0f*PI);
-  FOC_Input.Id_ref = 0.0f;               
+  FOC_Input.Id_ref = 0.0f;
   FOC_Input.Tpwm = PWM_TIM_PULSE_TPWM;         //FOC运行函数需要用到的输入信息
   FOC_Input.Udc = Vbus;
   FOC_Input.Rs = Rs;
   FOC_Input.Ls = Ls;
   FOC_Input.flux = flux;
-  
+
   FOC_Input.ia = Ia;
   FOC_Input.ib = Ib;
-  FOC_Input.ic = Ic;           
+  FOC_Input.ic = Ic;
   foc_algorithm_step();       //整个FOC运行函数（包括无感状态观测器，电流环，SVPWM，坐标变换，电机参数识别）
-  
+
   if(motor_start_stop==1)
   {
     PWM_TIM->CCR1 = (u16)(FOC_Output.Tcmp1);     //通过SVPWM得到的占空比赋值给定时器的寄存器
@@ -160,10 +160,12 @@ void motor_run(void)
     PWM_TIM->CCR2 = PWM_TIM_PULSE>>1;
     PWM_TIM->CCR3 = PWM_TIM_PULSE>>1;
   }
-  
+
   drv8301_protection();
-  
+
+  #if PC_COMMUNICATION_ENABLE
   communication_task();
+  #endif
   oled_display_sample_freq++;
   if(oled_display_sample_freq == 10)         //电路板自带OLED显示屏 模拟示波器显示波形功能
   {
@@ -184,7 +186,7 @@ void motor_run(void)
 
 void ADC_IRQHandler(void)
 {
-  
+
   if((SAMPLE_ADC->SR & ADC_FLAG_JEOC) == ADC_FLAG_JEOC)
   {
     if(get_offset_flag==2)
@@ -199,7 +201,7 @@ void ADC_IRQHandler(void)
         hall_angle -= 2.0f*PI;
       }
       motor_run();
-      
+
     }
     else
     {

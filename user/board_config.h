@@ -1,6 +1,9 @@
 #ifndef __BOARD_CONFIG_H_
 #define __BOARD_CONFIG_H_
 
+// Board feature switches
+#define PC_COMMUNICATION_ENABLE 0
+
 //UVW PWM define start
 #define PWM_TIM             TIM1
 #define PWM_TIM_CLOCK       180000000
@@ -12,7 +15,7 @@
 #define FOC_PERIOD          0.0001F
 
 #define DEAD_TIME         ((u16) 200)
-#define PWM_DEAD_TIME     (u16)((unsigned long long)PWM_TIM_CLOCK/2*(unsigned long long)DEAD_TIME/1000000000uL) 
+#define PWM_DEAD_TIME     (u16)((unsigned long long)PWM_TIM_CLOCK/2*(unsigned long long)DEAD_TIME/1000000000uL)
 
 #define PWM_TIM_CLK           RCC_APB2Periph_TIM1
 
@@ -192,7 +195,7 @@
 #define OLED_SPIx_SCK_GPIO_PORT      GPIOB
 #define OLED_SPIx_SCK_GPIO_CLK       RCC_AHB1Periph_GPIOB
 #define OLED_SPIx_SCK_SOURCE         GPIO_PinSource3
-                                                                                 
+
 #define OLED_SPIx_MOSI_PIN           GPIO_Pin_5
 #define OLED_SPIx_MOSI_GPIO_PORT     GPIOB
 #define OLED_SPIx_MOSI_GPIO_CLK      RCC_AHB1Periph_GPIOB
@@ -207,6 +210,11 @@
 #define OLED_RESET_GPIO_PORT         GPIOC
 #define OLED_RESET_GPIO_CLK          RCC_AHB1Periph_GPIOC
 #define OLED_RESET_SOURCE            GPIO_PinSource8
+
+#define OLED_CS_PIN                  GPIO_Pin_7
+#define OLED_CS_GPIO_PORT            GPIOC
+#define OLED_CS_GPIO_CLK             RCC_AHB1Periph_GPIOC
+#define OLED_CS_SOURCE               GPIO_PinSource7
 //OLED display define end
 
 //USER LED define start
@@ -221,7 +229,7 @@
 #define KEY_1_GPIO_PORT             GPIOC
 #define KEY_1_GPIO_CLK              RCC_AHB1Periph_GPIOC
 #define KEY_1_EXTI_GPIO_PORT        EXTI_PortSourceGPIOC
-#define KEY_1_EXTI_SOURCE           EXTI_PinSource4 
+#define KEY_1_EXTI_SOURCE           EXTI_PinSource4
 #define KEY_1_EXTI_LINE             EXTI_Line4
 
 #define KEY_2_PIN                   GPIO_Pin_5

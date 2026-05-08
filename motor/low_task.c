@@ -1,5 +1,5 @@
 /**********************************
-      
+
 **********************************/
 #include "main.h"
 #include "low_task.h"
@@ -21,7 +21,7 @@ void motor_start(void)
   hall_angle_add=0.0005f;
   hall_speed = 0.0f;
   TIM_CtrlPWMOutputs(PWM_TIM,ENABLE);
-  
+
   motor_run_display_flag = 1;
 }
 void motor_stop(void)
@@ -68,7 +68,7 @@ void low_control_task(void)
       {
         motor_stop();
       }
-      
+
     }
   }
   if(key1_flag==1)
@@ -121,10 +121,12 @@ void SysTick_Handler(void)
   hz_100_cnt++;
   if(hz_100_cnt==10)
   {
+    #if PC_COMMUNICATION_ENABLE
     communication_handle();
+    #endif
     low_control_task();
     TimingDelay_Decrement();
-    hz_100_cnt=0; 
+    hz_100_cnt=0;
   }
-  
+
 }
