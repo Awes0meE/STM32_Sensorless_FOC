@@ -55,7 +55,11 @@
 Keil_Project/stm32_drv8301_keil.uvprojx
 ```
 
-本次代码改动已用 `arm-none-eabi-gcc -fsyntax-only` 做过语法检查，但没有在命令行完成 Keil/IAR 全量构建。
+命令行环境可用 `arm-none-eabi-gcc -fsyntax-only` 做轻量语法检查；最终烧录前仍建议用 Keil/IAR 做完整构建。
+
+## 编码约定
+
+源码和文档统一使用 UTF-8。仓库已用 `.editorconfig` 和 `.gitattributes` 固定编码与换行规则，避免中文注释在 GitHub 或现代编辑器中显示为乱码。
 
 ## 上电提醒
 
