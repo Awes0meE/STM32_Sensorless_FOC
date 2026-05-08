@@ -30,6 +30,73 @@ extern float Rs;
 extern float Ls;
 extern float flux;
 
+static uint16_t compressor_vbus_fault_cnt = 0;
+static uint16_t compressor_current_fault_cnt = 0;
+
+static float adc_absf(float value)
+{
+  return (value >= 0.0f) ? value : -value;
+}
+
+static float compressor_limit_iq(float value)
+{
+  if(value > COMPRESSOR_IQ_LIMIT_A)
+  {
+    return COMPRESSOR_IQ_LIMIT_A;
+  }
+  if(value < -COMPRESSOR_REGEN_IQ_LIMIT_A)
+  {
+    return -COMPRESSOR_REGEN_IQ_LIMIT_A;
+  }
+  return value;
+}
+
+static void compressor_adc_safety_check(void)
+{
+  if((motor_start_stop != 1) || (compressor_state == COMPRESSOR_STATE_FAULT))
+  {
+    compressor_vbus_fault_cnt = 0;
+    compressor_current_fault_cnt = 0;
+    return;
+  }
+
+  if((Vbus < COMPRESSOR_VBUS_MIN_V) || (Vbus > COMPRESSOR_VBUS_MAX_V))
+  {
+    compressor_vbus_fault_cnt++;
+    if(compressor_vbus_fault_cnt >= COMPRESSOR_VBUS_FAULT_COUNT)
+    {
+      if(Vbus < COMPRESSOR_VBUS_MIN_V)
+      {
+        compressor_fault_trip(COMPRESSOR_FAULT_UNDERVOLTAGE);
+      }
+      else
+      {
+        compressor_fault_trip(COMPRESSOR_FAULT_OVERVOLTAGE);
+      }
+      return;
+    }
+  }
+  else
+  {
+    compressor_vbus_fault_cnt = 0;
+  }
+
+  if((adc_absf((float)Ia) > COMPRESSOR_PHASE_CURRENT_LIMIT_A) ||
+     (adc_absf((float)Ib) > COMPRESSOR_PHASE_CURRENT_LIMIT_A) ||
+     (adc_absf((float)Ic) > COMPRESSOR_PHASE_CURRENT_LIMIT_A))
+  {
+    compressor_current_fault_cnt++;
+    if(compressor_current_fault_cnt >= COMPRESSOR_CURRENT_FAULT_COUNT)
+    {
+      compressor_fault_trip(COMPRESSOR_FAULT_OVERCURRENT);
+    }
+  }
+  else
+  {
+    compressor_current_fault_cnt = 0;
+  }
+}
+
 void get_offset(uint32_t *a_offset,uint32_t *b_offset)
 {
   if(get_offset_sample_cnt<128)
@@ -64,6 +131,11 @@ void motor_run(void)
   Ic_test = Ic;
 
   int_test2 = ADC1ConvertedValue[0];
+  compressor_adc_safety_check();
+  if(compressor_state == COMPRESSOR_STATE_FAULT)
+  {
+    return;
+  }
 
   if(speed_close_loop_flag==0)         //速度环闭环切换控制，电机刚启动时速度环不闭环
   {                                    //并且电流参考值缓慢增加（防冲击），速度达到一定值
@@ -101,12 +173,12 @@ void motor_run(void)
   {
     FOC_Input.Id_ref = 0.0f;
     Speed_Fdk = hall_speed*2.0f*PI;
-    FOC_Input.Iq_ref = Speed_Pid_Out;
+    FOC_Input.Iq_ref = compressor_limit_iq(Speed_Pid_Out);
   }
   else
   {
     FOC_Input.Id_ref = 0.0f;
-    FOC_Input.Iq_ref = Iq_ref;
+    FOC_Input.Iq_ref = compressor_limit_iq(Iq_ref);
     Speed_Pid.I_Sum = Iq_ref;
   }
   FOC_Input.theta = hall_angle;
@@ -120,12 +192,12 @@ void motor_run(void)
   {
     FOC_Input.Id_ref = 0.0f;
     Speed_Fdk = FOC_Output.EKF[2];
-    FOC_Input.Iq_ref = Speed_Pid_Out;
+    FOC_Input.Iq_ref = compressor_limit_iq(Speed_Pid_Out);
   }
   else
   {
     FOC_Input.Id_ref = 0.0f;
-    FOC_Input.Iq_ref = Iq_ref;
+    FOC_Input.Iq_ref = compressor_limit_iq(Iq_ref);
     Speed_Pid.I_Sum = Iq_ref;
   }
   FOC_Input.theta = FOC_Output.EKF[3];

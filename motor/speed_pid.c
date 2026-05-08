@@ -2,15 +2,16 @@
 
 **********************************/
 #include "speed_pid.h"
+#include "foc_define_parameter.h"
 
 
 #define SPEED_PID_PERIOD 0.001F
 
-real32_T SPEED_PI_I = 3.0F;
+real32_T SPEED_PI_I = 1.0F;
 real32_T SPEED_PI_KB = 0.015F;
-real32_T SPEED_PI_LOW_LIMIT = -5.0F;
+real32_T SPEED_PI_LOW_LIMIT = -2.0F;
 real32_T SPEED_PI_P = 0.002F;
-real32_T SPEED_PI_UP_LIMIT = 8.0F;
+real32_T SPEED_PI_UP_LIMIT = COMPRESSOR_IQ_LIMIT_A;
 
 
 real32_T Speed_Ref;       //速度参考

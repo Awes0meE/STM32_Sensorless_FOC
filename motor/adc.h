@@ -13,6 +13,10 @@
 
 
 extern uint8_t get_offset_flag;
+extern double Ia;
+extern double Ib;
+extern double Ic;
+extern float Vbus;
 extern float theta;
 extern float angle;
 extern float Iq_ref;

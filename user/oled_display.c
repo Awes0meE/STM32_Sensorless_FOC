@@ -33,32 +33,38 @@ void oled_display_handle(void)
       if(clear_display_flag==0)
       {
         OLED_Clear();
-        OLED_ShowString(0,2,"hall_f:");
-        OLED_ShowString(0,4,"ekf_f:");
-        OLED_ShowString(0,6,"Iq_ref: .");
+        OLED_ShowString(0,2,"tgt:");
+        OLED_ShowString(0,4,"ekf:");
+        OLED_ShowString(0,6,"Iq: . F:");
         clear_display_flag=1;
       }
-      if(motor_run_display_flag_pre!=motor_run_display_flag)
+      if((motor_run_display_flag_pre!=motor_run_display_flag) ||
+         (compressor_state == COMPRESSOR_STATE_FAULT))
       {
-        if(motor_run_display_flag==1)
+        if(compressor_state == COMPRESSOR_STATE_FAULT)
         {
-          OLED_ShowString(0,0,"Motor:run ");
+          OLED_ShowString(0,0,"C:fault ");
+        }
+        else if(motor_run_display_flag==1)
+        {
+          OLED_ShowString(0,0,"C:run   ");
         }
         else
         {
-          OLED_ShowString(0,0,"Motor:stop");
+          OLED_ShowString(0,0,"C:stop  ");
         }
         motor_run_display_flag_pre = motor_run_display_flag;
       }
       
-      OLED_ShowNum(7*8,2,(u32)hall_speed,3,16);
+      OLED_ShowNum(4*8,2,(u32)(compressor_target_speed_hz*60.0f),4,16);
       
-      OLED_ShowNum(7*8,4,(u32)EKF_Hz,3,16);
+      OLED_ShowNum(4*8,4,(u32)EKF_Hz,3,16);
       
       
       
-      OLED_ShowNum(7*8,6,(u32)FOC_Input.Iq_ref,1,16);
-      OLED_ShowNum(9*8,6,(u32)(FOC_Input.Iq_ref*100),2,16);
+      OLED_ShowNum(3*8,6,(u32)FOC_Input.Iq_ref,1,16);
+      OLED_ShowNum(5*8,6,(u32)(FOC_Input.Iq_ref*100),2,16);
+      OLED_ShowNum(10*8,6,(u32)compressor_fault_code,1,16);
       
     }
     else if(display_flag==2)

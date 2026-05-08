@@ -57,11 +57,15 @@
 - PWM：`TIM1`，`PWM_TIM_FREQ=10000 Hz`，`FOC_PERIOD=0.0001F`。
 - 死区：`DEAD_TIME=200 ns`。
 - FOC 模式：`SENSORLESS_FOC_SELECT` 已启用，`HALL_FOC_SELECT` 已注释。
-- 启动电流：`MOTOR_STARTUP_CURRENT=2.0f`。
-- 速度闭环切入：`SPEED_LOOP_CLOSE_RAD_S=50.0f`。
-- 电机参数：`RS_PARAMETER=0.59f`，`LS_PARAMETER=0.001f`，`FLUX_PARAMETER=0.01150f`。
-- 速度环：`SPEED_PI_P=0.002F`，`SPEED_PI_I=3.0F`，输出限幅 `-5.0F` 到 `8.0F`。
-- DRV8301：6-PWM 输入，gate current `0.7 A`，OCP current limit，`OC_ADJ_SET_18`，电流放大倍数 `GAIN_AMP_10`。
+- 压缩机安全启动：`COMPRESSOR_SAFE_START_ENABLE=1`，12V 台架低速版本。
+- 速度范围：`30-50 Hz` 机械频率，即 `1800-3000 rpm`；`KEY3` 以 `5 Hz / 300 rpm` 步进循环。
+- 启动电流：`MOTOR_STARTUP_CURRENT=3.0f`。
+- 速度闭环切入：`SPEED_LOOP_CLOSE_RAD_S=120.0f`。
+- 保护阈值：母线 `9.0-15.5 V`，相电流连续超过 `6.0 A` 停机，故障/停机后 `10s` 重启等待。
+- 故障码：`1` 欠压，`2` 过压，`3` 过流，`4` 堵转，`5` 重启等待。
+- 电机参数：`RS_PARAMETER=0.376f`，`LS_PARAMETER=0.00020f`，`FLUX_PARAMETER=0.00650f`，来自 6MD030Z 手册和 Ke/Kt 估算，仍需实测整定。
+- 速度环：`SPEED_PI_P=0.002F`，`SPEED_PI_I=1.0F`，输出限幅约 `-2.0F` 到 `4.0F`。
+- DRV8301：6-PWM 输入，gate current `0.7 A`，OCP current limit，`OC_ADJ_SET_8`，电流放大倍数 `GAIN_AMP_10`。
 
 这些参数不应视为最终电机参数；换电机或母线电压后必须重新低风险整定。
 
@@ -78,21 +82,24 @@
 - 未做完整 Keil/IAR 构建，因为命令行环境未发现 `UV4/armcc/iarbuild`。
 - 已新增根目录 `README.md` 作为 GitHub/新人入口；长期细节仍以本文件为准。
 - 已将 `user/` 和 `motor/` 中原 GBK/CP1252 编码的源码注释维护为 UTF-8，并新增 `.editorconfig` 声明后续源码按 UTF-8 编辑。
+- 已新增“压缩机安全启动版本”：默认 1800 rpm、最高 3000 rpm，12V 母线窗口、相电流软件保护、12s 启动检查、2s 堵转确认、10s 重启等待。
+- 已将 6MD030Z 初始 FOC 参数写入 `motor/foc_define_parameter.h`：`Rs=0.376Ω`、`Ls=0.20mH`、`flux=0.00650Wb`，这些值是启动初值，不是最终标定。
+- 已把 DRV8301 硬件过流阈值从 `OC_ADJ_SET_18` 降为 `OC_ADJ_SET_8`，更适合 12V 小压缩机安全试机。
 
 ## 不依赖上位机后的操作方式
 
 - 上电后固件先初始化硬件、OLED、DRV8301、FOC，并进行电流零偏采样。
 - 零偏完成后，按 `KEY1 / PC4` 切换电机启停。
 - `KEY2 / PC5` 切换 OLED 显示页。
-- `KEY3 / PB2` 每次将 `Speed_Ref` 增加 `5 Hz`。
-- `motor_start()` 当前默认设置 `Speed_Ref=20.0F`。
+- `KEY3 / PB2` 将目标速度在 `1800/2100/2400/2700/3000 rpm` 间循环。
+- `motor_start()` 当前默认从 `30 Hz / 1800 rpm` 安全启动，不再使用原工程的 `20.0F`。
 
 ## 已知风险和后续任务
 
 - USB 上位机通信虽然默认关闭，但工程仍保留通信库和 USB 源文件；需要重新使用上位机时，再把 `PC_COMMUNICATION_ENABLE` 置 1 并复核 USB 48 MHz 时钟。
-- 当前无感 FOC 参数来自原工程，未确认适合用户手头电机；首轮必须关注启动电流、速度闭环切入点、RS/LS/磁链。
-- 当前 `KEY3` 只增加速度参考，没有降低速度参考的按键逻辑；实机调参时可能需要补一个减速或复位入口。
-- 保护阈值仍沿用原工程 DRV8301 配置；若要跑大功率，先明确 shunt、母线电压、MOSFET、散热和电源限流能力。
+- 当前 6MD030Z 参数是根据手册估算的启动初值；实机首轮必须记录空载/轻载电流、启动时间、EKF_Hz 是否稳定、母线跌落。
+- 12V 下无感低速启动仍可能因为反电动势太小而失败；如果 1800 rpm 启动不稳，下一步优先做开环对齐/强拖再切 EKF。
+- 保护阈值现在适合 12V 小压缩机试机；若要跑 24V 或更大功率，先明确 shunt、母线电压、MOSFET、散热和电源限流能力，并重新整定阈值。
 - 仓库中包含 Debug/Release/Keil 输出文件，后续整理时可考虑加 `.gitignore`，但不要在没有确认前大规模删除历史文件。
 
 ## 协作约定
