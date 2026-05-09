@@ -2565,3 +2565,67 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 fla
 ```
 
 下一步现场测试：按 30Hz、45Hz、60Hz 各跑一次，稳定停机后导出。重点看 `ekf_angle_err_rad` 是否稳定、`ekf_speed_ratio` 是否保持约 `0.95-0.98`，以及 `diag_flags` 是否出现 bit4/bit5/bit6。
+
+## 51. EKF 接管前诊断三频点结果
+
+在 `feature/ekf-handoff-diagnostics` 分支上，用户依次测试 45Hz、30Hz、60Hz。45Hz 第一次导出时没有先手动 stop，trace 最后一条出现 `fault=3` 的无效边界样本；稳定段仍有效。后续测试按“先 KEY1 停机、确认 `C:stop`、再导出”的流程执行。
+
+导出文件：
+
+```text
+build/trace_diag_45hz_handoff_diag.csv
+build/trace_diag_30hz_handoff_diag.csv
+build/trace_diag_60hz_handoff_diag.csv
+```
+
+稳定段统计：
+
+```text
+30Hz:
+  ol 平均：29.995Hz
+  EKF 平均：29.196Hz
+  EKF/ol：0.973
+  ekf_speed_ratio：平均 0.973，范围 0.963 到 0.989
+  相位误差：平均 0.186rad = 10.7°，范围 2.3° 到 17.0°
+  Iq/Id：3.001A / 3.002A
+  Vbus/Vq：11.651V / 1.786V
+  diag_flags：125
+
+45Hz:
+  ol 平均：44.960Hz
+  EKF 平均：43.036Hz
+  EKF/ol：0.957
+  ekf_speed_ratio：平均 0.957，范围 0.952 到 0.965
+  相位误差：平均 0.138rad = 7.9°，范围 2.1° 到 14.2°
+  Iq/Id：3.002A / 3.001A
+  Vbus/Vq：11.603V / 2.371V
+  diag_flags：125
+
+60Hz:
+  ol 平均：59.996Hz
+  EKF 平均：57.002Hz
+  EKF/ol：0.950
+  ekf_speed_ratio：平均 0.950，范围 0.944 到 0.980
+  相位误差：平均 0.087rad = 5.0°，范围 -0.6° 到 11.8°
+  Iq/Id：2.997A / 2.997A
+  Vbus/Vq：11.526V / 2.984V
+  diag_flags：125
+```
+
+`diag_flags=125` 表示：
+
+```text
+bit0 motor_control_ready
+bit2 open-loop force branch
+bit3 EKF update enabled
+bit4 speed ratio OK
+bit5 angle error OK
+bit6 handoff ready
+```
+
+阶段结论：
+
+- 三频点速度比例和角度误差都满足当前接管候选条件。
+- 相位误差随频率升高反而变小，60Hz 平均仅约 `5°` 电角度。
+- 电流环保持健康，`Iq/Id≈3A`，无持续异常电流。
+- 下一步可以实现“角度渐变混合接管版”：从开环角度缓慢 blend 到 EKF 角度，加入 fallback，不要硬切。

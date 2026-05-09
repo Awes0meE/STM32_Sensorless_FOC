@@ -106,6 +106,7 @@
 - beta 正常符号 + 确认版参数 + EKF 增益修复三频点结果：30Hz 稳定段 `EKF=+29.21Hz`、`EKF/ol=0.974`；45Hz 稳定段 `EKF=+43.06Hz`、`EKF/ol=0.957`；60Hz 稳定段 `EKF=+56.93Hz`、`EKF/ol=0.949`。`Iq/Id≈3A` 均稳定跟随，无 fault。结论：EKF 方向与速度尺度已基本修复，可进入“谨慎闭环接管”阶段，但应先加接管条件、角度误差监控和可回退逻辑。
 - 已从 `main` 切出 `feature/ekf-handoff-diagnostics` 分支并烧录接管前诊断版。此版实际 FOC 驱动角度仍为开环 `hall_angle`，不进行闭环接管；新增 `ekf_angle_error_rad = EKF angle - FOC_Input.theta`、`ekf_speed_ratio = EKF_Hz / open_loop_hz`、`ekf_handoff_speed_ok`、`ekf_handoff_angle_ok`、`ekf_handoff_ready`。接管候选条件为开环不低于 25Hz、速度比例 `0.90-1.10`、角度误差绝对值不超过 `0.70rad`，连续 10000 个 10kHz FOC tick 约 1s 后置 ready。
 - 接管诊断版 OLED 第二页把原 `F:` 位置改成 `ph:`，显示 EKF 与开环角度差的电角度度数；故障状态仍由顶部 `C:fault` 和保护状态机判断。trace `diag_flags` 新增 bit4 速度 OK、bit5 角度 OK、bit6 handoff ready。
+- 接管诊断版三频点结果：30Hz `speed_ratio=0.973`、相位误差均值约 `10.7°`；45Hz `speed_ratio=0.957`、相位误差均值约 `7.9°`；60Hz `speed_ratio=0.950`、相位误差均值约 `5.0°`。三点稳定段 `diag_flags=125`，即速度 OK、角度 OK、handoff ready 均成立。下一步可以做“角度渐变混合接管版”，不要硬切。
 - VSCode 构建默认使用 `D:\ST\STM32CubeCLT_1.21.0`，也可通过环境变量 `STM32CUBECLT_PATH` 覆盖构建脚本路径；调试配置路径在 `.vscode/launch.json` 中维护。
 - GCC 构建产物位于 `build/stm32_drv8301.elf/.hex/.bin`，`build/` 已由 `.gitignore` 忽略。
 - 为了让 PC 通信关闭时能 GCC 链接，`user/stm32f4xx_it.*` 中的 USB OTG handler 已按 `PC_COMMUNICATION_ENABLE` 包裹；GCC 专用 newlib stub 位于 `tools/gcc_syscalls.c`。
