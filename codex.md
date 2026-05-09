@@ -2,6 +2,35 @@
 
 更新时间：2026-05-09
 
+## 当前安全固化版：EC11 30-80Hz 开环可调
+
+- 最新安全决策：用户观察到压缩机在高频开环测试后外壳约 `45-50°C`，且 `OL≈80Hz` 的吸力已经满足当前产品需求；停止继续向 `120Hz+` 开环硬推。
+- 当前烧录版本已关闭上电自启动：`COMPRESSOR_AUTO_TEST_ENABLE=0`，复位后不会自动启动压缩机，必须按 `KEY1` 才运行。
+- EC11 旋钮范围已锁定为 `450-1200rpm`，对应 8 极 6MD030Z 的 `30-80Hz` 电角频率；默认值为 `1200rpm / 80Hz`，每格 `60rpm / 4Hz`。用户确认旋钮方向反了，当前已设 `COMPRESSOR_EC11_DIRECTION=-1`。
+- `COMPRESSOR_OPEN_LOOP_STARTUP_BOOST_RPM` 改为 `COMPRESSOR_EC11_DEFAULT_RPM`，即启动 boost 最高只到 `80Hz`，不再使用 `2000rpm / 133Hz`。
+- 高频 V/f 实验分支已关闭：`COMPRESSOR_OPEN_LOOP_VF_ENABLE=0`。当前版本回到电流环开环 FOC 保持，不使用 110Hz 以上的电压模式。
+- 软件连续相电流保护恢复到 `COMPRESSOR_PHASE_CURRENT_LIMIT_A=6.0A`，快速相电流保护仍为 `10.0A`；`MOTOR_STARTUP_CURRENT` 和运行 `Iq` 保持 `2.5A`，`Id` 定位/运行保持 `3.0A`。
+- 本版本定位为“低速产品演示/旋钮可调安全版”，不是 EKF 闭环接管版；EKF 仍只用于 OLED/trace 观察。
+
+## 最新分支记忆：开环 EC11 压缩机控制
+
+- 当前新增分支：`feature/open-loop-pot-compressor`。
+- 分支目标：先不继续推进 EKF 接管，把已经验证稳定的开环 FOC 做成接近商品压缩机驱动板的控制方式。
+- EC11 旋钮硬件：A 相 `PB6`，B 相 `PB7`；OLED CS 已由用户确认是 `PC7`，与 PB7 不冲突。
+- 速度换算：6MD030Z 是 8 极电机，即 4 对极；机械 `1800rpm` 等于电角频率 `120Hz`，机械 `3000rpm` 等于电角频率 `200Hz`。
+- 当前启动逻辑：按 `KEY1` 后 1s 定位，然后开环拉到 EC11 设定目标；当前默认/最高为 `1200rpm / 80Hz`，不再做 `120Hz+` 自动测试或高频 boost。
+- EC11 参数：默认 `1200rpm`，范围 `450-1200rpm`，每格 `60rpm`；旋钮方向已按实测改为 `COMPRESSOR_EC11_DIRECTION=-1`。
+- 开环斜率：升速 `2Hz/s`，降速 `8Hz/s`。
+- 本分支关闭 `EKF_HANDOFF_BLEND_ENABLE`，EKF 只做 OLED/trace 诊断，不参与驱动角度。
+- OLED 默认直接显示参数页，不再先显示 logo；`KEY2` 只在参数页/扩展页之间切换。参数页：`rpm:` 当前开环机械转速，`set:` EC11 设定 rpm，`ol:` 当前电角 Hz，`ekf:` EKF Hz，`r/q` 为 q 轴命令和反馈电流。
+- OLED 页面切换残影已修：`display_flag` 变化时会复位 `clear_display_flag`，从波形页切回参数页会强制清屏；波形页也会清掉最后一列旧 buffer。
+- 已通过 `tools/vscode-build.ps1 build`，并已通过 `tools/vscode-build.ps1 flash` 烧录到 ST-LINK 连接的 STM32F446。
+- 测试工况声明：截至当前所有“稳定运行”结论都来自压缩机进气口、出气口均不接管路的开放空载工况；用户手堵吸气口导致的 `F3` 属于人为负载扰动，不等同于带真实制冷系统压差运行。
+- EC11 开环首次 fault 诊断：导出的 CSV 为空，因为旧 trace 只在 EKF 接管窗口附近启动；GDB 读到 `fault_code=3`，`Vbus=12.106V`，`Ia=-3.60A`，`Ib=-5.88A`，`Ic=9.48A`，`current_fault_cnt=50`，`drv8301_fault_flag=0`。结论是软件相电流过流，不是 EKF 接管或 DRV8301 硬件 fault。已把产品开环分支 trace 改成从启动开始记录，采样周期 `10ms`。
+- EC11 开环第二次 trace：`build/trace_20260509_105216_ec11_start_fault.csv`，903 samples/10ms。故障前最后 800ms：`ol_hz=109.4->121.2Hz`、`avg_vbus=11.123V`、`min_vbus=11.04V`、`avg_iq=2.854A`、`avg_id=3.009A`、非故障帧 `max_abs_phase=4.24A`。故障帧：`fault=3`、`ia=-4.07A`、`ib=-5.47A`、重构 `ic=9.54A`。判断为在开环约 `121Hz` 电角频率、机械约 `1818rpm` 附近出现软件相电流过流；不建议直接抬高过流阈值，优先降低 boost 或做分段限流/降 Id。
+- 历史自动测试结论：曾短暂启用 `COMPRESSOR_AUTO_TEST_ENABLE=1` 做 1800-2000rpm 上探；1800rpm/120Hz 需要保留足够 d 轴吸附电流，2000rpm/133Hz 一带会明显发热且控制裕量不足。该自动测试现已关闭，不应在产品低速版恢复。
+- 最新烧录版：低速 EC11 产品演示安全版，`30-80Hz` 可调，关闭上电 logo与自动测试。上一轮 120Hz 堵吸口触发 `fault=3` 说明软件相电流保护有效，但不作为当前低速版目标工况。
+
 ## 项目身份
 
 - 仓库：`https://github.com/Awes0meE/STM32_Sensorless_FOC`
@@ -58,11 +87,11 @@
 - 死区：`DEAD_TIME=200 ns`。
 - FOC 模式：`SENSORLESS_FOC_SELECT` 已启用，`HALL_FOC_SELECT` 已注释。
 - 压缩机安全启动：`COMPRESSOR_SAFE_START_ENABLE=1`，12V 台架开环保持诊断版。
-- 速度参考范围：`120-200 Hz` 电频率；对 4 对极 6MD030Z 约等价于 `1800-3000 rpm` 机械转速。当前诊断版不自动切入该闭环速度参考。
-- 启动电流：参考 GE2117 参数，先用 `COMPRESSOR_STARTUP_ID_CURRENT=3.0f` 做 1s d 轴定位，定位结束后 `Id=3A`、`Iq=0-3A` 正向开环慢拖；`Iq` 约 `8s` 爬到 3A。
-- 开环强拖：`COMPRESSOR_FORCE_START_ENABLE=1`，`COMPRESSOR_OPEN_LOOP_HOLD_ENABLE=1`，启动阶段先 `1s` 固定电角度 d 轴定位，再用 `1-30/45/60 Hz` 开环角度斜坡，斜率 `1.5 Hz/s`，到 `cap:` 选择值后保持开环；`COMPRESSOR_OPEN_LOOP_DIRECTION=1.0f`。反向 `-1.0f` 已实测更差。
-- OLED 诊断：`ol:` 为当前开环电频率，`cap:` 为本次开环保持目标频点；底行 `r:` 为命令 q 轴电流 `FOC_Input.Iq_ref`，`q:` 为实际 q 轴反馈电流 `Current_Idq.Iq`；不要再把命令值当作真实相电流。
-- RAM trace：`motor/trace.c/h` 每 `40ms` 记录一次启动黑匣子，2048 条约 `82s`；按 `KEY1` 启动时 `trace_reset()`，故障/停机后自动冻结。导出用 `tools/export-trace.ps1` 或 VSCode 任务 `Export trace CSV`。
+- 速度参考范围：`30-80 Hz` 电频率；对 4 对极 6MD030Z 约等价于 `450-1200 rpm` 机械转速。当前安全版不再自动上探 `120Hz+`。
+- 启动电流：先用 `COMPRESSOR_STARTUP_ID_CURRENT=3.0f` 做 1s d 轴定位，定位结束后 `Id=3A`、`Iq=0-2.5A` 正向开环慢拖；`Iq` 约 `6.7s` 爬到 2.5A。
+- 开环强拖：`COMPRESSOR_FORCE_START_ENABLE=1`，`COMPRESSOR_OPEN_LOOP_HOLD_ENABLE=1`，启动阶段先 `1s` 固定电角度 d 轴定位，再用 `1-30..80 Hz` 开环角度斜坡，升速 `2Hz/s`、降速 `8Hz/s`，到 EC11 设定值后保持开环；`COMPRESSOR_OPEN_LOOP_DIRECTION=1.0f`。反向 `-1.0f` 已实测更差。
+- OLED 诊断：参数页 `rpm:` 为当前开环机械转速，`set:` 为 EC11 设定转速，`ol:` 为当前开环电频率；底行 `r:` 为命令 q 轴电流 `FOC_Input.Iq_ref`，`q:` 为实际 q 轴反馈电流 `Current_Idq.Iq`；不要再把命令值当作真实相电流。
+- RAM trace：`motor/trace.c/h` 当前为接管窗口密集记录模式；按 `KEY1` 只清空并 armed，等 `target_ok` 或 handoff/fallback 出现后才真正开始写入。采样周期 `20ms`，1792 条约 `35.84s`，故障/停机后自动冻结。导出用 `tools/export-trace.ps1` 或 VSCode 任务 `Export trace CSV`。当前 trace record 为 64 字节，包含 `ekf_angle_err_rad`、`ekf_speed_ratio`、`handoff_blend`、`trip_blend`、`trip_angle_err_rad`、`trip_speed_ratio`、`trip_reason`、`handoff_state`、`handoff_offset_rad`。`handoff_state=4` 是接管前降电流阶段，此时 `handoff_blend` 表示电流衰减进度；`handoff_state=1` 才表示 EKF 角度混合进度。
 - 速度闭环切入：`SPEED_LOOP_CLOSE_RAD_S=120.0f`。
 - 保护阈值：母线 `9.0-15.5 V`，相电流连续超过 `6.0 A` 停机，故障/停机后 `10s` 重启等待。
 - 故障码：`1` 欠压，`2` 过压，`3` 过流，`4` 堵转，`5` 重启等待。
@@ -85,13 +114,13 @@
 - 未做完整 Keil/IAR 构建，因为命令行环境未发现 `UV4/armcc/iarbuild`。
 - 已新增根目录 `README.md` 作为 GitHub/新人入口；长期细节仍以本文件为准。
 - 已将 `user/` 和 `motor/` 中原 GBK/CP1252 编码的源码注释维护为 UTF-8，并新增 `.editorconfig` 声明后续源码按 UTF-8 编辑。
-- 已新增“压缩机安全启动版本”：当前切到开环保持诊断档，默认运行目标 120 Hz 电频率但不自动闭环接管；实际启动/运行先按 `cap:` 保持 `1-30/45/60 Hz` 开环，先 `Id=3A/Iq=0A` 定位，再 `Id=3A/Iq=0-3A` 拖动，12V 母线窗口、相电流软件保护、40s 启动检查、3s 堵转确认、10s 重启等待。
+- 已新增“压缩机安全启动版本”：当前切到 EC11 低速开环保持档，默认/最高运行目标为 `80Hz` 电频率；启动/运行先 `Id=3A/Iq=0A` 定位，再 `Id=3A/Iq=0-2.5A` 拖动，12V 母线窗口、相电流软件保护、150s 启动检查、3s 堵转确认、10s 重启等待。
 - 2026-05-09 中间验证：加入 `2-18 Hz` 开环强拖启动后，12V 下压缩机曾可低速 `C:run`，但重复启动成功率低；后续用 RAM trace 证明电流环能跟随，真正问题在 EKF/速度闭环接管。
 - 2026-05-09 关键基线：45Hz 开环保持、`Id=3A/Iq=3A`、12V 台架电源约 1A 时压缩机稳定运行且吸力强；trace 显示 `Vbus≈11.53-11.62V`、`Vq≈2.38-2.40V`、`Iq` 误差约 0.01A。第一次稳定导出里 EKF 约 `-21Hz`，后续三次 repeat 导出里 EKF 稳定为正且约 `36.7-36.8Hz`；完整断电重启后也复现 `+36.8Hz`。多频点标定版中 30/45/60Hz 又全部表现为负向 EKF：`-16.08/-21.93/-28.33Hz`。当时判断为 EKF 输入符号/初始化/输出符号不可信，未完成校准前禁止自动闭环接管。
 - 已将 6MD030Z 确认版 EKF 参数写入 `motor/foc_define_parameter.h`：`Rs=0.188Ω`、`Ls=0.36mH`、`flux=0.00580Wb`。注意当前 `stm32_ekf_wrapper.c` 只使用 `Rs/Ls/flux`，没有使用极对数或转动惯量；极对数主要用于电角速度和机械 rpm 的换算。
 - 已把 DRV8301 硬件过流阈值从 `OC_ADJ_SET_18` 降为 `OC_ADJ_SET_8`，更适合 12V 小压缩机安全试机。
 - 已打通 VSCode + STM32CubeCLT + ST-Link 链路：`.vscode/tasks.json`、`.vscode/launch.json`、`.vscode/c_cpp_properties.json`、`tools/vscode-build.ps1`、`tools/export-trace.ps1`。
-- 2026-05-09 多频点 EKF 标定版已烧录：`KEY3` 仅在停机时循环 `cap=30/45/60Hz`，OLED 第二页显示 `ol:` 和 `cap:`；默认上电为 `cap=30Hz`。
+- 2026-05-09 多频点 EKF 标定版曾用于 `KEY3` 循环 `cap=30/45/60Hz`。当前产品演示安全版改为 EC11 旋钮设定 `30-80Hz`，`KEY3` 频点循环不作为主要控制入口。
 - 2026-05-09 EKF 初始化时序诊断补丁已烧录：新增 `motor_control_ready` 门闩，防止 KEY1 启动后 ADC JEOC 在 `foc_algorithm_initialize()` 完成前抢跑 `motor_run()/EKF`；OLED EKF 改为 signed Hz；trace record 扩展到 48 字节并记录 `target_hz/foc_theta/ekf_angle/Valpha/Vbeta/Ialpha/Ibeta/diag_flags`。
 - ready 门闩后 30Hz 复测仍为负 EKF：定位后 OLED 显示 `-8Hz`，稳定后 `-16Hz`，trace 稳定段 `EKF=-16.16Hz`、`EKF/ol=-0.539`、`diag_flags=5`。说明 OLED signed 修正有效，但负分支不只是初始化抢跑造成；trace 采样已改为 40ms 以覆盖约 82s。
 - 45Hz 完整 trace 抓到定位阶段 EKF 假速度：在 0-1000ms 定位阶段 `theta=0`、`Iq_ref=0`、`Id≈3A`，EKF 从 0 跑到约 `-8.7Hz`。已烧录补丁：定位阶段 `foc_ekf_update_enable=0` 跳过 EKF 更新，定位结束瞬间 `foc_ekf_reset()`，然后再开启 EKF 更新。下一轮重点看定位阶段 EKF 是否保持 0，以及定位后是否仍走负分支。
@@ -104,6 +133,14 @@
 - 2026-05-09 已根据用户重新确认的扫描版手册参数改成“确认版参数 + EKF 增益修复”版本：`Rs=0.188Ω`、`Ls=0.36mH`、`flux=0.00580Wb`；并修复 `stm32_ekf_wrapper.c` 中 Kalman 增益矩阵计算覆盖原值的问题。原代码在计算 `K = P H^T S^-1` 时先覆盖 `K_x_0`，随后计算 `K_x_1` 又使用了覆盖后的 `K_x_0`，会使 EKF 更新矩阵偏斜。
 - 确认版参数 + EKF 增益修复 + beta 取反复测 45Hz：稳定段 `EKF=-43.11Hz`、`EKF/ol=-0.958`、`Iq/Id≈3.00A`、`Vbus≈11.59V`、`Vq≈2.38V`。幅值已经基本对上，方向为负，说明半速问题基本解决，且 beta 轴取反不再适用。当前已烧录 beta 正常符号版：`EKF_V_BETA_SIGN=+1`、`EKF_I_BETA_SIGN=+1`，下一轮优先复测 45Hz，预期 EKF 接近 `+43Hz` 到 `+45Hz`。
 - beta 正常符号 + 确认版参数 + EKF 增益修复三频点结果：30Hz 稳定段 `EKF=+29.21Hz`、`EKF/ol=0.974`；45Hz 稳定段 `EKF=+43.06Hz`、`EKF/ol=0.957`；60Hz 稳定段 `EKF=+56.93Hz`、`EKF/ol=0.949`。`Iq/Id≈3A` 均稳定跟随，无 fault。结论：EKF 方向与速度尺度已基本修复，可进入“谨慎闭环接管”阶段，但应先加接管条件、角度误差监控和可回退逻辑。
+- 历史上曾从 `main` 切出 `feature/ekf-handoff-diagnostics` 分支并烧录接管前诊断版。此版实际 FOC 驱动角度仍为开环 `hall_angle`，不进行闭环接管；新增 `ekf_angle_error_rad = EKF angle - FOC_Input.theta`、`ekf_speed_ratio = EKF_Hz / open_loop_hz`、`ekf_handoff_speed_ok`、`ekf_handoff_angle_ok`、`ekf_handoff_ready`。接管候选条件为开环不低于 25Hz、速度比例 `0.90-1.10`、角度误差绝对值不超过 `0.70rad`，连续 10000 个 10kHz FOC tick 约 1s 后置 ready。
+- 接管诊断版 OLED 第二页把原 `F:` 位置改成 `ph:`，显示 EKF 与开环角度差的电角度度数；故障状态仍由顶部 `C:fault` 和保护状态机判断。trace `diag_flags` 新增 bit4 速度 OK、bit5 角度 OK、bit6 handoff ready。
+- 接管诊断版三频点结果：30Hz `speed_ratio=0.973`、相位误差均值约 `10.7°`；45Hz `speed_ratio=0.957`、相位误差均值约 `7.9°`；60Hz `speed_ratio=0.950`、相位误差均值约 `5.0°`。三点稳定段 `diag_flags=125`，即速度 OK、角度 OK、handoff ready 均成立。下一步可以做“角度渐变混合接管版”，不要硬切。
+- 历史 `feature/ekf-handoff-diagnostics` 曾烧录角度渐变接管版：满足 handoff ready 后，`ekf_handoff_blend` 用约 `2s` 从 `0` 增至 `1`，FOC 角度按最短电角度差从开环 `hall_angle` 混到 EKF 角度；`FOC_Input.speed_fdk` 同步按 blend 在开环速度和 EKF 速度间插值。若 blending/full EKF 阶段速度比例或相位误差失效，则 `ekf_handoff_state=FALLBACK` 并回到开环角度。trace `diag_flags` 新增 bit7 blending、bit8 full EKF angle、bit9 fallback。
+- 2026-05-09 已确认 `stm32_ekf_wrapper.c` 不是缺失支持文件：`foc_algorithm_step()` 每个 FOC tick 会调用 `stm32_ekf_Outputs_wrapper()` 和 `stm32_ekf_Update_wrapper()`，输入 `Valpha/Vbeta/Ialpha/Ibeta/Rs/Ls/flux`，输出 `FOC_Output.EKF[2]` 速度和 `FOC_Output.EKF[3]` 角度。30/45/60Hz 标定里 EKF 速度已能跟 OL 接近，说明 wrapper 正在参与运算；真正风险在开环强拖电流矢量切到 EKF 坐标系时的接管策略。
+- 2026-05-09 当前接管策略：先用严格 ready 门槛确认 EKF 与开环同步，再进入 `EKF_HANDOFF_STATE_DECAY=4`。DECAY 阶段仍使用开环角度，但把 `Id_ref` 用约 `8s` 从 `3A` 降到 `0A`，把 `Iq_ref` 从 `3A` 轻降到 `2.5A`；DECAY 完成后改用专用接管门槛，确认低 d 轴电流下 EKF 仍稳定，再锁存 `handoff_offset_rad = open_loop_angle - EKF_angle` 并进入 BLEND。BLEND 阶段用约 `8s` 将角度从 `EKF_angle + offset` 衰减到纯 EKF 角度，`speed_fdk` 仍保持开环速度；进入 EKF 状态后才使用 EKF speed。
+- 最新软化参数：接管前 ready 用严格 `speed_ratio=0.90-1.10`、角度误差 `<=0.70rad`、连续约 `1s`；DECAY `EKF_HANDOFF_DECAY_TICKS=80000`；DECAY 完成后的接管门槛为 `speed_ratio=0.94-1.06`、角度误差 `<=0.90rad`、连续约 `1s`；BLEND `EKF_HANDOFF_BLEND_TICKS=80000`；接管运行中速度健康窗口 `0.75-1.25` 且连续约 `100ms` 不健康才 fallback。fallback 后保持开环角度和低 d 轴电流，避免回退瞬间又把 3A d 轴定位电流打回去。
+- DECAY 后专用门槛版 45Hz 结果：能从 `DECAY(4)` 进入 `BLEND(1)`，但 BLEND 约 `1.24s` 后在 `trip_blend=0.155` 回退到 `FALLBACK(3)`；锁存 `trip_speed_ratio=1.267`、`trip_angle_err=-2.508rad`、`trip_reason=24`。BLEND 前电流和 Vq 正常，问题是 EKF 角度参与后观测速度被带高。下一步不要继续放宽保护；应改成更慢/更小步的相位校正，或先做“速度观测锁定/PLL式 theta correction”，避免直接按 EKF 角度混合。
 - VSCode 构建默认使用 `D:\ST\STM32CubeCLT_1.21.0`，也可通过环境变量 `STM32CUBECLT_PATH` 覆盖构建脚本路径；调试配置路径在 `.vscode/launch.json` 中维护。
 - GCC 构建产物位于 `build/stm32_drv8301.elf/.hex/.bin`，`build/` 已由 `.gitignore` 忽略。
 - 为了让 PC 通信关闭时能 GCC 链接，`user/stm32f4xx_it.*` 中的 USB OTG handler 已按 `PC_COMMUNICATION_ENABLE` 包裹；GCC 专用 newlib stub 位于 `tools/gcc_syscalls.c`。
@@ -114,7 +151,7 @@
 - 零偏完成后，按 `KEY1 / PC4` 切换电机启停。
 - `KEY2 / PC5` 切换 OLED 显示页。
 - `KEY3 / PB2` 在停机时切换开环标定频点：`30 -> 45 -> 60 Hz` 循环；运行中按 KEY3 不改变频点，避免扰动压缩机。
-- `motor_start()` 当前会先 `1s` 定位，然后按 `cap:` 做 `1-30/45/60 Hz` 开环慢拖并保持。OLED 第二页 `ol:` 是实际开环电频率，`cap:` 是目标保持频点，`r:`/`q:` 是命令/反馈 q 轴电流。
+- `motor_start()` 当前会先 `1s` 定位，然后按 EC11 设定做 `1-30..80Hz` 开环慢拖并保持。OLED 参数页 `ol:` 是实际开环电频率，`rpm:`/`set:` 是当前/设定机械转速，`r:`/`q:` 是命令/反馈 q 轴电流。
 
 ## 已知风险和后续任务
 

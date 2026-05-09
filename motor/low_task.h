@@ -23,8 +23,11 @@ extern volatile uint8_t motor_control_ready;
 extern COMPRESSOR_STATE_DEF compressor_state;
 extern uint8_t compressor_fault_code;
 extern float compressor_target_speed_hz;
+extern float compressor_ec11_target_rpm;
+extern float compressor_ec11_target_hz;
 extern uint32_t compressor_restart_wait_ms;
 
+void ec11_encoder_sample_isr(void);
 void compressor_clear_fault(void);
 void compressor_fault_trip(uint8_t fault_code);
 

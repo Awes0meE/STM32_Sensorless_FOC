@@ -128,6 +128,9 @@ extern FOC_INPUT_DEF FOC_Input;
 extern FOC_OUTPUT_DEF FOC_Output;
 
 extern uint8_T foc_ekf_update_enable;
+extern uint8_T foc_voltage_mode_enable;
+extern real32_T foc_voltage_mode_vd;
+extern real32_T foc_voltage_mode_vq;
 
 extern void foc_ekf_reset(void);
 extern void foc_algorithm_initialize(void);

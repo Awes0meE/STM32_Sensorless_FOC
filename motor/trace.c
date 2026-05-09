@@ -17,6 +17,7 @@ volatile TRACE_META_DEF trace_meta = {
 
 static uint32_t trace_time_ms = 0u;
 static uint8_t trace_divider = 0u;
+static uint8_t trace_armed = 0u;
 
 static int16_t trace_float_to_i16(float value,float scale)
 {
@@ -59,7 +60,68 @@ static int16_t trace_diag_flags(void)
   {
     flags |= 0x0008;
   }
+  if(ekf_handoff_speed_ok != 0u)
+  {
+    flags |= 0x0010;
+  }
+  if(ekf_handoff_angle_ok != 0u)
+  {
+    flags |= 0x0020;
+  }
+  if(ekf_handoff_ready != 0u)
+  {
+    flags |= 0x0040;
+  }
+  if(ekf_handoff_state == EKF_HANDOFF_STATE_BLEND)
+  {
+    flags |= 0x0080;
+  }
+  if(ekf_handoff_state == EKF_HANDOFF_STATE_EKF)
+  {
+    flags |= 0x0100;
+  }
+  if(ekf_handoff_state == EKF_HANDOFF_STATE_FALLBACK)
+  {
+    flags |= 0x0200;
+  }
+  if(ekf_handoff_target_ok != 0u)
+  {
+    flags |= 0x0400;
+  }
+  if(ekf_handoff_state == EKF_HANDOFF_STATE_DECAY)
+  {
+    flags |= 0x0800;
+  }
   return flags;
+}
+
+static uint8_t trace_should_start(void)
+{
+  if(compressor_state == COMPRESSOR_STATE_FAULT)
+  {
+    return 1u;
+  }
+#if COMPRESSOR_PRODUCT_OPEN_LOOP_ENABLE
+  if((motor_start_stop != 0u) &&
+     ((compressor_state == COMPRESSOR_STATE_STARTING) ||
+      (compressor_state == COMPRESSOR_STATE_RUNNING)))
+  {
+    return 1u;
+  }
+#endif
+  if(motor_start_stop == 0u)
+  {
+    return 0u;
+  }
+  if(ekf_handoff_target_ok != 0u)
+  {
+    return 1u;
+  }
+  if(ekf_handoff_state != EKF_HANDOFF_STATE_OPEN_LOOP)
+  {
+    return 1u;
+  }
+  return 0u;
 }
 
 void trace_reset(void)
@@ -68,12 +130,13 @@ void trace_reset(void)
   trace_meta.write_index = 0u;
   trace_meta.wrapped = 0u;
   trace_meta.sample_count = 0u;
-  trace_meta.active = 1u;
+  trace_meta.active = 0u;
   trace_meta.buffer_size = TRACE_BUFFER_SIZE;
   trace_meta.record_size = sizeof(TRACE_RECORD_DEF);
   trace_meta.sample_period_ms = TRACE_SAMPLE_PERIOD_MS;
   trace_time_ms = 0u;
   trace_divider = 0u;
+  trace_armed = 1u;
 }
 
 void trace_sample_10ms(void)
@@ -82,7 +145,15 @@ void trace_sample_10ms(void)
 
   if(trace_meta.active == 0u)
   {
-    return;
+    if((trace_armed == 0u) || (trace_should_start() == 0u))
+    {
+      if(motor_start_stop == 0u)
+      {
+        trace_armed = 0u;
+      }
+      return;
+    }
+    trace_meta.active = 1u;
   }
 
   trace_divider++;
@@ -113,11 +184,20 @@ void trace_sample_10ms(void)
   trace_buffer[index].vbeta_x100 = trace_float_to_i16(FOC_Interface_states.EKF_Interface[1],100.0f);
   trace_buffer[index].ialpha_x100 = trace_float_to_i16(FOC_Interface_states.EKF_Interface[2],100.0f);
   trace_buffer[index].ibeta_x100 = trace_float_to_i16(FOC_Interface_states.EKF_Interface[3],100.0f);
+  trace_buffer[index].ekf_angle_err_x1000 = trace_float_to_i16(ekf_angle_error_rad,1000.0f);
+  trace_buffer[index].ekf_speed_ratio_x1000 = trace_float_to_i16(ekf_speed_ratio,1000.0f);
   trace_buffer[index].diag_flags = trace_diag_flags();
   trace_buffer[index].state = (uint8_t)compressor_state;
   trace_buffer[index].fault = compressor_fault_code;
   trace_buffer[index].motor = motor_start_stop;
   trace_buffer[index].speed_flag = speed_close_loop_flag;
+  trace_buffer[index].handoff_blend_x1000 = trace_float_to_i16(ekf_handoff_blend,1000.0f);
+  trace_buffer[index].trip_blend_x1000 = trace_float_to_i16(ekf_handoff_trip_blend,1000.0f);
+  trace_buffer[index].trip_angle_err_x1000 = trace_float_to_i16(ekf_handoff_trip_angle_error_rad,1000.0f);
+  trace_buffer[index].trip_speed_ratio_x1000 = trace_float_to_i16(ekf_handoff_trip_speed_ratio,1000.0f);
+  trace_buffer[index].trip_reason = ekf_handoff_trip_reason;
+  trace_buffer[index].handoff_state = ekf_handoff_state;
+  trace_buffer[index].handoff_offset_x1000 = trace_float_to_i16(ekf_handoff_angle_offset_rad,1000.0f);
 
   trace_time_ms += TRACE_SAMPLE_PERIOD_MS;
   trace_meta.sample_count++;
@@ -132,5 +212,6 @@ void trace_sample_10ms(void)
   if((compressor_state == COMPRESSOR_STATE_FAULT) || (motor_start_stop == 0u))
   {
     trace_meta.active = 0u;
+    trace_armed = 0u;
   }
 }

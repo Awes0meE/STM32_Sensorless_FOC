@@ -8,7 +8,8 @@ This STM32F4 + DRV8301 sensorless FOC project is adapted for the user's custom P
 - Main project: `Keil_Project/stm32_drv8301_keil.uvprojx`.
 - VSCode/ST-Link path is wired through `tools/vscode-build.ps1`.
 - USB/PC host communication is disabled by default with `PC_COMMUNICATION_ENABLE=0`.
-- Current drive mode is open-loop FOC hold for 30/45/60Hz EKF calibration. Do not enable automatic EKF closed-loop handoff without adding guarded transition logic.
+- Current drive mode is the low-speed EC11 open-loop product demo: 30-80Hz electrical, 450-1200rpm mechanical, no power-on auto-start. Do not re-enable 120Hz+ auto tests without an explicit safety reason.
+- `COMPRESSOR_EC11_DIRECTION=-1` because the bench encoder direction was confirmed reversed.
 
 ## Working Rules
 
@@ -35,4 +36,6 @@ Open-loop trace results:
 - 45Hz: EKF `+43.06Hz`, ratio `0.957`
 - 60Hz: EKF `+56.93Hz`, ratio `0.949`
 
-Next stage: cautiously design open-loop to EKF handoff by first measuring EKF/open-loop angle difference, then adding angle blending and fallback.
+Current development branch: `feature/open-loop-pot-compressor`.
+
+This branch is currently frozen around a safer product-demo point: open-loop FOC, EC11 adjustable 30-80Hz, `Iq≈2.5A`, `Id≈3A`, `COMPRESSOR_AUTO_TEST_ENABLE=0`, and `COMPRESSOR_OPEN_LOOP_VF_ENABLE=0`. EKF handoff experiments are paused; EKF remains useful for OLED/trace diagnostics only.

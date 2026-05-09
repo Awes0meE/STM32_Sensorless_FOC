@@ -247,6 +247,24 @@
 #define KEY_3_EXTI_LINE             EXTI_Line2
 //key define end
 
+//EC11 encoder define start
+#define EC11_ENCODER_ENABLE         1
+
+#define EC11_A_PIN                  GPIO_Pin_6
+#define EC11_A_GPIO_PORT            GPIOB
+#define EC11_A_GPIO_CLK             RCC_AHB1Periph_GPIOB
+#define EC11_A_EXTI_GPIO_PORT       EXTI_PortSourceGPIOB
+#define EC11_A_EXTI_SOURCE          EXTI_PinSource6
+#define EC11_A_EXTI_LINE            EXTI_Line6
+
+#define EC11_B_PIN                  GPIO_Pin_7
+#define EC11_B_GPIO_PORT            GPIOB
+#define EC11_B_GPIO_CLK             RCC_AHB1Periph_GPIOB
+#define EC11_B_EXTI_GPIO_PORT       EXTI_PortSourceGPIOB
+#define EC11_B_EXTI_SOURCE          EXTI_PinSource7
+#define EC11_B_EXTI_LINE            EXTI_Line7
+//EC11 encoder define end
+
 
 
 extern void hard_init(void);

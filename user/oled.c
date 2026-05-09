@@ -123,6 +123,10 @@ void oled_display(void)
     }
     for(i=0;i<8;i++)
     {
+      display_buff[i][127] = 0;
+    }
+    for(i=0;i<8;i++)
+    {
       OLED_WR_Byte (0xb0+i);
       OLED_WR_Byte (0x02);
       OLED_WR_Byte (0x10);

@@ -7,14 +7,14 @@
 
 real32_T D_PI_I = 1282.8F;
 real32_T D_PI_KB = 15.0F;
-real32_T D_PI_LOW_LIMIT = -24.0F;
+real32_T D_PI_LOW_LIMIT = -COMPRESSOR_CURRENT_PI_CORRECTION_LIMIT_V;
 real32_T D_PI_P = 2.199F;
-real32_T D_PI_UP_LIMIT = 24.0F;
+real32_T D_PI_UP_LIMIT = COMPRESSOR_CURRENT_PI_CORRECTION_LIMIT_V;
 real32_T Q_PI_I = 1282.8F;
 real32_T Q_PI_KB = 15.0F;
-real32_T Q_PI_LOW_LIMIT = -24.0F;
+real32_T Q_PI_LOW_LIMIT = -COMPRESSOR_CURRENT_PI_CORRECTION_LIMIT_V;
 real32_T Q_PI_P = 2.199F;
-real32_T Q_PI_UP_LIMIT = 24.0F;
+real32_T Q_PI_UP_LIMIT = COMPRESSOR_CURRENT_PI_CORRECTION_LIMIT_V;
 
 
 FOC_INTERFACE_STATES_DEF FOC_Interface_states;
@@ -25,6 +25,9 @@ FOC_INPUT_DEF FOC_Input;
 
 FOC_OUTPUT_DEF FOC_Output;
 uint8_T foc_ekf_update_enable = 1u;
+uint8_T foc_voltage_mode_enable = 0u;
+real32_T foc_voltage_mode_vd = 0.0F;
+real32_T foc_voltage_mode_vq = 0.0F;
 
 
 RT_MODEL rtM_;
@@ -102,6 +105,19 @@ VOLTAGE_DQ_DEF Voltage_DQ;
 CURRENT_PID_DEF Current_D_PID;
 CURRENT_PID_DEF Current_Q_PID;
 
+static real32_T foc_limit_voltage(real32_T value)
+{
+  if(value > COMPRESSOR_CURRENT_VOLTAGE_LIMIT_V)
+  {
+    return COMPRESSOR_CURRENT_VOLTAGE_LIMIT_V;
+  }
+  if(value < -COMPRESSOR_CURRENT_VOLTAGE_LIMIT_V)
+  {
+    return -COMPRESSOR_CURRENT_VOLTAGE_LIMIT_V;
+  }
+  return value;
+}
+
 /***************************************
 功能：Clark变换
 形参：三相电流以及alpha_beta电流
@@ -171,8 +187,9 @@ void SVPWM_Calc(VOLTAGE_ALPHA_BETA_DEF v_alpha_beta_temp,real32_T Udc_temp,real3
 
   f_temp = Tx + Ty;
   if (f_temp > Tpwm_temp) {
-    Tx /= f_temp;
-    Ty /= (Tx + Ty);
+    f_temp = Tpwm_temp / f_temp;
+    Tx *= f_temp;
+    Ty *= f_temp;
   }
 
   Ta = (Tpwm_temp - (Tx + Ty)) / 4.0F;
@@ -292,6 +309,22 @@ void foc_algorithm_step(void)
   Park_Transf(Current_Ialpha_beta,Transf_Cos_Sin,&Current_Idq);  //Park变换，由Ialpha Ibeta 与角度信息，去计算Id Iq  // 由交流信息转化为直流信息，方便PID控制
   Current_PID_Calc(FOC_Input.Id_ref,Current_Idq.Id,&Voltage_DQ.Vd,&Current_D_PID);     //D轴电流环PID  根据电流参考与电流反馈去计算 输出电压
   Current_PID_Calc(FOC_Input.Iq_ref,Current_Idq.Iq,&Voltage_DQ.Vq,&Current_Q_PID);     //Q轴电流环PID  根据电流参考与电流反馈去计算 输出电压
+#if COMPRESSOR_CURRENT_FEEDFORWARD_ENABLE
+  Voltage_DQ.Vd += FOC_Input.Rs * FOC_Input.Id_ref -
+                   FOC_Input.speed_fdk * FOC_Input.Ls * FOC_Input.Iq_ref;
+  Voltage_DQ.Vq += FOC_Input.Rs * FOC_Input.Iq_ref +
+                   FOC_Input.speed_fdk * (FOC_Input.flux +
+                                          FOC_Input.Ls * FOC_Input.Id_ref);
+  Voltage_DQ.Vd = foc_limit_voltage(Voltage_DQ.Vd);
+  Voltage_DQ.Vq = foc_limit_voltage(Voltage_DQ.Vq);
+#endif
+  if(foc_voltage_mode_enable != 0u)
+  {
+    Voltage_DQ.Vd = foc_limit_voltage(foc_voltage_mode_vd);
+    Voltage_DQ.Vq = foc_limit_voltage(foc_voltage_mode_vq);
+    Current_D_PID.I_Sum = 0.0F;
+    Current_Q_PID.I_Sum = 0.0F;
+  }
   Rev_Park_Transf(Voltage_DQ,Transf_Cos_Sin,&Voltage_Alpha_Beta);                //反park变换  通过电流环得到的dq轴电压信息结合角度信息，去把直流信息转化为交流信息用于SVPWM的输入
 
   FOC_Interface_states.EKF_Interface[0] = EKF_V_ALPHA_SIGN * Voltage_Alpha_Beta.Valpha;   //扩展卡尔曼估计转子位置与速度需要的输入信息
@@ -389,6 +422,9 @@ void foc_algorithm_initialize(void)
   speed_pid_initialize();  //速度环PID 参数 初始化
 
   foc_ekf_update_enable = 1u;
+  foc_voltage_mode_enable = 0u;
+  foc_voltage_mode_vd = 0.0F;
+  foc_voltage_mode_vq = 0.0F;
   foc_ekf_reset();//扩展卡尔曼滤波算法 参数初始化
 
   L_identification_Start_wrapper(&FOC_Interface_states.L_Ident_States);//电机电感参数识别算法 参数初始化

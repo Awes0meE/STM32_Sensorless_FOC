@@ -15,7 +15,7 @@ u8 display_index;
 u8 display_index_key;
 u8 display_cnt;
 
-u8 display_flag;
+u8 display_flag=1;
 u8 clear_display_flag=0;
 u8 drv8301_fault_flag = 0;
 
@@ -73,8 +73,27 @@ static void OLED_ShowSignedHz(u8 x,u8 y,float value)
   OLED_ShowNum(x+1*8,y,integer_part,3,16);
 }
 
+static void OLED_ShowSignedDeg(u8 x,u8 y,float value_rad)
+{
+  float value_deg;
+
+  value_deg = value_rad * 57.29578f;
+  OLED_ShowSignedHz(x,y,value_deg);
+}
+
 void oled_display_handle(void)
 {
+  u32 open_loop_rpm;
+  u32 target_rpm;
+  static u8 display_flag_pre = 0xffu;
+
+  if(display_flag_pre != display_flag)
+  {
+    clear_display_flag = 0;
+    motor_run_display_flag_pre = !motor_run_display_flag;
+    display_flag_pre = display_flag;
+  }
+
   if(drv8301_fault_flag == 0)
   {
     if(display_flag==0)
@@ -88,8 +107,8 @@ void oled_display_handle(void)
       if(clear_display_flag==0)
       {
         OLED_Clear();
-        OLED_ShowString(0,2,"ol:    cap:");
-        OLED_ShowString(0,4,"ekf:    F:");
+        OLED_ShowString(0,2,"rpm:    set:    ");
+        OLED_ShowString(0,4,"ol:    ekf:    ");
         OLED_ShowString(0,6,"r:      q:     ");
         clear_display_flag=1;
       }
@@ -111,11 +130,21 @@ void oled_display_handle(void)
         motor_run_display_flag_pre = motor_run_display_flag;
       }
       
-      OLED_ShowNum(3*8,2,(u32)compressor_open_loop_speed_hz,3,16);
-      OLED_ShowNum(11*8,2,(u32)compressor_open_loop_target_hz,3,16);
+      open_loop_rpm = (u32)(COMPRESSOR_EHZ_TO_RPM(compressor_open_loop_speed_hz) + 0.5f);
+      target_rpm = (u32)(compressor_ec11_target_rpm + 0.5f);
+      if(open_loop_rpm > 9999u)
+      {
+        open_loop_rpm = 9999u;
+      }
+      if(target_rpm > 9999u)
+      {
+        target_rpm = 9999u;
+      }
+      OLED_ShowNum(4*8,2,open_loop_rpm,4,16);
+      OLED_ShowNum(12*8,2,target_rpm,4,16);
       
-      OLED_ShowSignedHz(4*8,4,EKF_Hz);
-      OLED_ShowNum(12*8,4,(u32)compressor_fault_code,1,16);
+      OLED_ShowNum(3*8,4,(u32)compressor_open_loop_speed_hz,3,16);
+      OLED_ShowSignedHz(11*8,4,EKF_Hz);
       
       OLED_ShowSignedCurrent(2*8,6,FOC_Input.Iq_ref);
       OLED_ShowSignedCurrent(10*8,6,Current_Idq.Iq);

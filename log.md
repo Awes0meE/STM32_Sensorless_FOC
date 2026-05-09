@@ -1,5 +1,269 @@
 # STM32 Sensorless FOC 压缩机驱动调试日志
 
+## 66. 开环 EC11 压缩机控制分支
+
+2026-05-09，基于前面 30/45/60Hz 开环稳定运行、但 EKF 接管仍存在扰动的结论，先打出 `feature/open-loop-pot-compressor` 分支，做一个更接近商品压缩机驱动板手感的开环控制版本。
+
+本轮决策：
+- 继续使用开环 FOC/SVPWM，不做 EKF 闭环接管。
+- 6MD030Z 为 8 极电机，即 4 对极；机械 `3000rpm` 对应电角频率 `200Hz`。
+- 按 `KEY1` 启动后先定位 1s，再把开环频率拉到 `200Hz / 3000rpm`。
+- 达到 3000rpm 后进入运行态，再按 EC11 设定转速缓慢回落或上升。
+- EC11 A/B 相由用户确认接在 MCU `PB6/PB7`；OLED CS 由用户确认是 `PC7`，因此不与 PB7 冲突。
+
+本轮代码修改：
+- 新增 `COMPRESSOR_PRODUCT_OPEN_LOOP_ENABLE=1`。
+- 新增 EC11 参数：默认 `1800rpm`、范围 `450-3000rpm`、每格 `100rpm`。
+- `PB6/PB7` 配成上拉输入，EXTI 双边沿触发，使用四相表解码并累计 4 个边沿作为一格。
+- OLED 第二页改为显示当前开环机械 rpm、EC11 设定 rpm、开环电角 Hz、EKF Hz、Iq 命令和反馈。
+- 开环频率支持缓升和缓降：升速 `15Hz/s`，降速 `8Hz/s`。
+- 本分支关闭 EKF handoff blend，只保留 EKF 诊断显示，不让 EKF 参与驱动角度。
+
+验证：
+```text
+powershell -ExecutionPolicy Bypass -File tools\vscode-build.ps1 build
+FLASH: 30680 B / 512 KB
+RAM:   120720 B / 128 KB = 92.10%
+
+powershell -ExecutionPolicy Bypass -File tools\vscode-build.ps1 flash
+ST-LINK SN: 37FF71064E573436F3CF1243
+Device: STM32F446xx
+Download verified successfully
+MCU Reset
+```
+
+下一轮实测重点：
+- OLED 第二页 `set:` 是否随 EC11 正确增减，方向若反了只需改 `COMPRESSOR_EC11_DIRECTION`。
+- 按 KEY1 后是否先到约 `3000rpm`，再缓慢回到 EC11 设定 rpm。
+- 观察 12V 台架电源电流、声音、吸力、OCTW/FAULT、压缩机温升。
+- 如果 200Hz/3000rpm 对 12V 母线偏高导致转矩不足或声音异常，优先降低 boost rpm 或降低升速斜率。
+
+## 67. EC11 开环版首次 fault 导出
+
+用户反馈 EC11 开环启动版跳 `fault` 后，使用 `tools/export-trace.ps1` 导出：
+
+```text
+build/trace_20260509_104748_open_loop_ec11_fault.csv
+samples=0
+write_index=0
+active=0
+```
+
+CSV 为空的原因不是 ST-LINK 没读到，而是旧 trace 触发条件仍然服务于 EKF 接管窗口；本次故障发生在启动早期，trace 尚未开始写入。
+
+随后直接用 GDB 读固件变量，关键状态为：
+
+```text
+compressor_fault_code = 3
+compressor_state = COMPRESSOR_STATE_FAULT
+drv8301_fault_flag = 0
+Vbus = 12.106V
+Ia = -3.60A
+Ib = -5.88A
+Ic = 9.48A
+current_fault_cnt = 50
+open_loop_target_hz = 200Hz
+ec11_target_rpm = 1800rpm
+```
+
+结论：
+- 这次不是 EKF 接管故障，也不是 DRV8301 `OCTW/FAULT` 硬件故障。
+- 是固件软件相电流保护触发，故障码 `3`。
+- 当前软件相电流阈值为 `6A`，当时重构出的 `Ic` 已到约 `9.48A`，并且连续计数达到 `50` 后停机。
+
+已追加诊断补丁：
+- 产品开环分支下 trace 从启动阶段就开始记录，不再等 EKF handoff 条件。
+- trace 采样周期从 `20ms` 改为 `10ms`，方便捕获启动早期过流。
+
+## 68. EC11 开环版第二次 fault trace
+
+用户在 trace 修正后再次试跑并要求导出。本次导出文件：
+
+```text
+build/trace_20260509_105216_ec11_start_fault.csv
+samples=903
+period=10ms
+覆盖时间约 9.03s
+```
+
+关键统计：
+
+```text
+故障前最后 800ms：
+  ol_hz: 109.4 -> 121.2Hz
+  target_hz: 200Hz
+  avg_vbus: 11.123V
+  min_vbus: 11.04V
+  avg_iq: 2.854A
+  avg_id: 3.009A
+  avg_vd: 1.671V
+  avg_vq: 4.934V
+  max_abs_vq: 5.24V
+  max_abs_phase: 4.24A
+
+故障触发帧：
+  time_ms: 9020
+  ol_hz: 1.0Hz   # fault handler 已 reset open-loop speed，因此此帧 ol_hz 不代表故障前速度
+  上一帧 ol_hz: 121.2Hz
+  ekf_hz: 174.2Hz
+  iq_ref: 3.00A
+  iq_fb: 2.82A
+  id_fb: -9.31A
+  ia: -4.07A
+  ib: -5.47A
+  ic: 9.54A
+  vbus: 12.14V
+  fault: 3
+```
+
+判断：
+- 本次不是台架电源限流，不是母线欠压，也不是 DRV8301 硬件 fault。
+- 故障前一段时间电流环能正常跟随 `Id/Iq≈3A`，且母线最低约 `11.04V`，没有明显供电崩塌。
+- 软件保护是在开环升到约 `121Hz` 电角频率，机械约 `1818rpm` 附近触发。
+- 故障帧里 `Ia/Ib` 都为负，重构 `Ic=-Ia-Ib` 变为 `+9.54A`，超过当前 `6A` 软件相电流保护阈值。
+- 由于 trace 采样是 10ms，而 ADC 保护计数在 10kHz 中断内运行，真正过流可能发生在两个 trace 帧之间持续约数毫秒；本帧是已经触发 fault 后记录到的结果。
+
+下一步倾向：
+- 不直接放宽 `COMPRESSOR_PHASE_CURRENT_LIMIT_A`。
+- 先降低 3000rpm boost 的冲刺强度：要么把 boost 从 `3000rpm/200Hz` 降到当前能稳定跨过的更低值，比如 `1800rpm/120Hz` 或 `2000rpm/133Hz`；要么保留 3000rpm 但分段限流/降 `Id`，避免 `Id=3A + Iq=3A` 在 120Hz 以上继续推高相电流。
+
+## 69. 自动测试闭环：1800rpm / Id 衰减试验
+
+用户希望不再手动反复按 KEY1，因此加入临时自动测试：
+
+```text
+COMPRESSOR_AUTO_TEST_ENABLE=1
+上电/复位后零偏完成，再等待 2s 自动启动
+最多运行 18s，故障或到时自动停机
+```
+
+第一轮自动测试修改：
+- boost 从 `3000rpm/200Hz` 降到 `1800rpm/120Hz`。
+- 开环升速斜率从 `15Hz/s` 降到 `10Hz/s`。
+- 试图在高转速降低 d 轴吸附电流：`45Hz` 开始从 `Id=3A` 衰减，`100Hz` 以后降到 `Id=0.8A`。
+
+导出：
+
+```text
+build/trace_20260509_110302_auto_1800_id_decay_final.csv
+samples=1792
+fault=0
+max_ol_hz=120Hz
+max_abs_phase=3.43A
+stable avg_iq=2.999A
+stable avg_id=0.800A
+stable avg_vbus=11.831V
+stable avg_vq=0.827V
+```
+
+用户物理观察：压缩机中间堵转震动。
+
+trace 对应判断：
+- 虽然没有软件 fault，但稳定段 `EKF_Hz` 只有约 `0.5-1Hz`，而开环命令是 `120Hz`，说明转子没有跟住开环磁场。
+- 低 `Id=0.8A` 让相电流和 Vq 都变小，但也让开环吸附/同步能力不足。
+- 这轮是“保护上安全、机械上失败”。
+
+第二轮自动测试修改：
+- 1800rpm 以内不再降 `Id`，即 `Id=3A` 保持到 `130Hz` 之后才允许衰减。
+- 新增开环堵转保护：当 `speed_close_loop_flag=2`、开环速度超过 `30Hz` 后，如果 `abs(EKF_Hz) < 0.35 * open_loop_hz` 连续 `800ms`，触发 `F4` 停机，避免长时间原地震。
+
+导出：
+
+```text
+build/trace_20260509_110511_auto_1800_id3_stallguard.csv
+samples=1792
+fault=0
+max_ol_hz=120Hz
+max_ekf_hz=115.8Hz
+min_vbus=10.94V
+max_abs_phase=4.34A
+stable avg_iq=3.007A
+stable avg_id=2.990A
+stable avg_ekf=115.498Hz
+stable avg_vbus=11.096V
+stable avg_vq=5.261V
+```
+
+第二轮判断：
+- `Id=3A` 保持后，EKF 重新跟住开环速度，约为 `115.5Hz / 120Hz = 96.3%`。
+- 相电流峰值 `4.34A`，没有触发 6A 软件过流，也没有出现上一轮的 9A 重构尖峰。
+- 1800rpm/120Hz 对当前 12V 台架、开环 FOC、`Id/Iq=3A` 是可作为下一轮基线的配置。
+- 下一轮若继续上探，不应直接跳 3000rpm；应按 `1800 -> 2000 -> 2200 -> ...` 分段，每段观察 EKF/OL 比例、Vbus、相电流和物理声音/吸力。
+
+## 70. OLED 默认参数页与 1800rpm 基线复测
+
+用户反馈第二轮体感正常后，提出一个观察便利性修改：每次烧录或复位后不要先进入 OLED logo 页，而是直接显示 4 行参数列表。
+
+补充测试工况声明：
+
+```text
+截至当前，所有稳定运行测试都是压缩机进气口和出气口都不接任何管路的开放空载工况。
+也就是说，这些数据证明的是“裸压缩机在空气端口开放时能稳定被开环 FOC 拖动”。
+它还不等价于已经验证真实制冷系统里的带压差、带冷媒、带热负荷运行。
+```
+
+本轮代码修改：
+
+```text
+user/oled_display.c:
+  display_flag 默认从 0 改为 1
+
+motor/low_task.c:
+  KEY2 显示页循环从 0/1/2 改成 1/2，避免再切回 logo 页
+
+motor/foc_define_parameter.h:
+  启动 boost 保持在当前基线 1800rpm/120Hz
+```
+
+中间尝试过一次 `2000rpm/133.3Hz` boost 探测，但 trace 在约 `120Hz` 附近出现 `F3` 过流记录；考虑到用户随后说明测试中有手动堵吸气口动作，本轮不把 2000rpm 结果作为确定的自发失败结论，也不把它留在固件里。
+
+最终烧录版本仍是 `1800rpm/120Hz` 基线：
+
+```text
+powershell -ExecutionPolicy Bypass -File tools\vscode-build.ps1 flash
+FLASH used: 31020 B / 512 KB = 5.92%
+RAM used:   120736 B / 128 KB = 92.11%
+Download verified successfully
+MCU Reset
+```
+
+导出文件：
+
+```text
+build/trace_20260509_111111_auto_1800_no_logo.csv
+samples=1664
+period=10ms
+active=0，停机/故障后已冻结
+```
+
+稳定段数据：
+
+```text
+ol_hz = 120.0Hz
+EKF_Hz 平均约 115.40Hz
+Iq_fb 平均约 3.01A
+Id_fb 平均约 2.99A
+Vbus 平均约 11.09V
+Vq 平均约 5.26V
+运行时相电流峰值约 4.32A
+```
+
+末尾记录：
+
+```text
+fault = 3
+用户物理观察：压缩机本来在开放空载下运行正常；手堵吸气口后电流上升，然后触发 fault
+DRV OCTW/FAULT 未作为主故障来源
+```
+
+判断：
+
+- 本次 `F3` 不是代码自发启动失败，而是人为堵吸造成负载突增后触发软件相电流保护。
+- 这说明 6A 软件相电流保护链路能工作，当前不应为了“堵住也不跳”去抬高阈值。
+- 当前可继续把 `1800rpm/120Hz + Id/Iq≈3A + 开环 FOC + EKF 仅诊断` 作为安全基线。
+- 后续进入真实产品形态前，必须单独做“带管路/带压差/带冷媒或等效负载”的升流和保护验证；当前空载数据不能直接外推到满负载。
+- 下一次如果要验证自然停机是否完全干净，应不堵吸、不干扰，让自动测试完整跑到 18s 后再导出一次；若无 fault，说明停机路径也干净。
+
 本文档记录我从零开始把 `STM32F446RET6 + DRV8301` 无感 FOC 固件移植到自制压缩机驱动板上的过程。写法尽量保留实验报告和项目博客的口吻，重点记录我做了什么、测到了什么、基于这些结果做了什么判断，以及下一步为什么这样走。
 
 ## 项目背景
@@ -2507,3 +2771,1308 @@ build/trace_diag_60hz_confirmed_params_ekf_fix_beta_normal.csv
 - EKF/ol 随频率从 `0.974` 到 `0.949` 略微下降，仍有约 `3-5%` 的模型误差。可能来自单一 `Ls` 无法表示 `Ld/Lq`、电压模型/死区压降、母线电压采样误差或磁链微调。
 - 电流环状态健康：三频点 `Iq/Id≈3A` 均稳定，Vq 随频率上升，符合预期。
 - 下一阶段可以开始做“谨慎闭环接管”：先在 45Hz 稳定开环时观察 EKF 角度与开环角度差，再加入角度渐变混合，不要直接硬切到 EKF。
+
+## 50. 创建 EKF 接管前诊断分支
+
+从 `main` 创建新分支：
+
+```text
+feature/ekf-handoff-diagnostics
+```
+
+目标：进入开环到 EKF 闭环接管前的角度诊断阶段，但不让固件真正闭环接管，避免硬切角度导致抖动、失步或过流。
+
+代码修改：
+
+```text
+motor/foc_define_parameter.h
+- 新增 EKF_HANDOFF_* 诊断阈值：
+  - 最低开环频率 25Hz
+  - 速度比例允许 0.90 到 1.10
+  - 角度误差阈值 0.70rad
+  - 连续 10000 个 10kHz FOC tick 后判定 ready
+
+motor/adc.c/h
+- 新增 ekf_angle_error_rad
+- 新增 ekf_speed_ratio
+- 新增 ekf_handoff_speed_ok / ekf_handoff_angle_ok / ekf_handoff_ready
+- 每次 FOC step 后计算 EKF angle 与当前开环 FOC_Input.theta 的差值
+- 实际 FOC 驱动仍然使用开环 hall_angle，不切 EKF
+
+motor/trace.c/h
+- trace record 从 48 字节扩展到 52 字节
+- 新增 ekf_angle_err_rad 与 ekf_speed_ratio 两列
+- diag_flags 新增：
+  - bit4：速度比例达标
+  - bit5：角度误差达标
+  - bit6：连续满足接管候选条件
+
+tools/export-trace.ps1
+- 支持 52 字节 trace record
+- CSV 新增 ekf_angle_err_rad、ekf_speed_ratio
+
+user/oled_display.c
+- 第二页 `F:` 改为 `ph:`
+- `ph:` 显示 `EKF angle - open-loop angle` 的电角度误差，单位为度
+```
+
+验证：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 build
+结果：成功
+FLASH: 29648B / 512KB
+RAM: 112496B / 128KB, 85.83%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 flash
+结果：成功，已通过 ST-LINK 烧录并复位
+```
+
+下一步现场测试：按 30Hz、45Hz、60Hz 各跑一次，稳定停机后导出。重点看 `ekf_angle_err_rad` 是否稳定、`ekf_speed_ratio` 是否保持约 `0.95-0.98`，以及 `diag_flags` 是否出现 bit4/bit5/bit6。
+
+## 51. EKF 接管前诊断三频点结果
+
+在 `feature/ekf-handoff-diagnostics` 分支上，用户依次测试 45Hz、30Hz、60Hz。45Hz 第一次导出时没有先手动 stop，trace 最后一条出现 `fault=3` 的无效边界样本；稳定段仍有效。后续测试按“先 KEY1 停机、确认 `C:stop`、再导出”的流程执行。
+
+导出文件：
+
+```text
+build/trace_diag_45hz_handoff_diag.csv
+build/trace_diag_30hz_handoff_diag.csv
+build/trace_diag_60hz_handoff_diag.csv
+```
+
+稳定段统计：
+
+```text
+30Hz:
+  ol 平均：29.995Hz
+  EKF 平均：29.196Hz
+  EKF/ol：0.973
+  ekf_speed_ratio：平均 0.973，范围 0.963 到 0.989
+  相位误差：平均 0.186rad = 10.7°，范围 2.3° 到 17.0°
+  Iq/Id：3.001A / 3.002A
+  Vbus/Vq：11.651V / 1.786V
+  diag_flags：125
+
+45Hz:
+  ol 平均：44.960Hz
+  EKF 平均：43.036Hz
+  EKF/ol：0.957
+  ekf_speed_ratio：平均 0.957，范围 0.952 到 0.965
+  相位误差：平均 0.138rad = 7.9°，范围 2.1° 到 14.2°
+  Iq/Id：3.002A / 3.001A
+  Vbus/Vq：11.603V / 2.371V
+  diag_flags：125
+
+60Hz:
+  ol 平均：59.996Hz
+  EKF 平均：57.002Hz
+  EKF/ol：0.950
+  ekf_speed_ratio：平均 0.950，范围 0.944 到 0.980
+  相位误差：平均 0.087rad = 5.0°，范围 -0.6° 到 11.8°
+  Iq/Id：2.997A / 2.997A
+  Vbus/Vq：11.526V / 2.984V
+  diag_flags：125
+```
+
+`diag_flags=125` 表示：
+
+```text
+bit0 motor_control_ready
+bit2 open-loop force branch
+bit3 EKF update enabled
+bit4 speed ratio OK
+bit5 angle error OK
+bit6 handoff ready
+```
+
+阶段结论：
+
+- 三频点速度比例和角度误差都满足当前接管候选条件。
+- 相位误差随频率升高反而变小，60Hz 平均仅约 `5°` 电角度。
+- 电流环保持健康，`Iq/Id≈3A`，无持续异常电流。
+- 下一步可以实现“角度渐变混合接管版”：从开环角度缓慢 blend 到 EKF 角度，加入 fallback，不要硬切。
+
+## 52. 实现角度渐变混合接管版
+
+在 `feature/ekf-handoff-diagnostics` 分支继续实现第一版真正接管逻辑，但仍保持电流策略保守，不启用产品级速度闭环。
+
+设计原则：
+
+- 不硬切 EKF 角度。
+- 只有三频点已验证的接管候选条件满足后才开始。
+- FOC 角度从开环 `hall_angle` 按最短电角度差混合到 EKF angle。
+- 混合时间约 `2s`。
+- 若速度比例或 EKF/开环相位误差失效，回退到开环。
+
+代码修改：
+
+```text
+motor/foc_define_parameter.h
+- 新增 EKF_HANDOFF_BLEND_ENABLE=1
+- 新增 EKF_HANDOFF_BLEND_TICKS=20000
+
+motor/adc.c/h
+- 新增 ekf_handoff_blend
+- 新增 ekf_handoff_state:
+  - OPEN_LOOP
+  - BLEND
+  - EKF
+  - FALLBACK
+- ekf_angle_error_rad 改为始终表示 EKF angle - open-loop hall_angle
+- 满足 ready 后 blend 从 0 增到 1
+- FOC_Input.theta = hall_angle + shortest_angle_error(EKF - hall) * blend
+- FOC_Input.speed_fdk 同步在开环速度和 EKF 速度之间插值
+
+motor/trace.c
+- diag_flags 新增：
+  - bit7：正在 blend
+  - bit8：已经 full EKF angle
+  - bit9：fallback
+```
+
+验证：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 build
+结果：成功
+FLASH: 30136B / 512KB
+RAM: 112504B / 128KB, 85.83%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 flash
+结果：成功，已通过 ST-LINK 烧录并复位
+```
+
+下一步现场测试建议：
+
+```text
+1. 先测 45Hz
+2. 跑稳后观察声音、电源电流、吸力是否和接管前一致
+3. OLED ph 不应突然大跳
+4. KEY1 停机后导出
+5. trace 中应看到 diag_flags 从 125 进入 bit7，再进入 bit8；不能出现 bit9 fallback
+```
+
+## 53. 45Hz 渐变接管失败复盘与保守修正
+
+现场现象：
+
+```text
+45Hz 跑稳后，能感觉到固件想要接闭环；
+每次接管时压缩机会抖一下，然后又回到原来的稳定开环；
+随后固件继续尝试接管，循环往复，看起来一直没有真正成功。
+```
+
+导出文件：
+
+```text
+build/trace_diag_45hz_blend_attempt.csv
+```
+
+trace 统计结果：
+
+```text
+diag_flags=253  509 samples  ready + open-loop + EKF update + speed_ok + angle_ok + handoff_ready + blend
+diag_flags=573  325 samples  ready + open-loop + EKF update + speed_ok + angle_ok + fallback
+diag_flags=61    25 samples  ready + open-loop + EKF update + speed_ok + angle_ok
+diag_flags=541    1 sample   ready + open-loop + EKF update + speed_ok + fallback，且 angle_ok 丢失
+```
+
+关键时间序列判断：
+
+```text
+第一次满足 ready：ol 约 25.0Hz，EKF 约 24.5Hz，ratio 约 0.981
+第一次进入 blend：ol 约 26.5Hz，EKF 约 26.0Hz，ratio 约 0.979
+第一次 fallback：ol 约 28.8Hz，EKF 约 27.9Hz，ratio 约 0.971
+45Hz 稳态后仍反复出现 blend -> fallback
+```
+
+结论：
+
+- 这次不是 DRV8301 硬件保护，`OCTW/FAULT` 没有参与；日志里也没有电压或过流保护触发。
+- 原策略只要求开环频率超过 `25Hz`，所以在 45Hz 目标还没有到达时就提前开始 EKF 接管。
+- 我们之前验证的 EKF 相位误差是在 `30/45/60Hz` 稳态点完成的，并没有验证“边爬坡边接管”。
+- blend 过程中 `EKF angle - open-loop angle` 会逐步变大，接近或超过 `0.70rad` 阈值后触发 fallback；fallback 后误差又恢复，于是 1 秒 ready 后再次尝试，形成用户观察到的循环。
+
+代码修正：
+
+```text
+motor/foc_define_parameter.h
+- 新增 EKF_HANDOFF_TARGET_TOL_HZ = 0.5f
+- 新增 EKF_HANDOFF_STICKY_FALLBACK = 1
+
+motor/adc.c/h
+- 新增 ekf_handoff_target_ok
+- 接管条件必须同时满足：
+  1. 开环频率已经到 cap 目标附近，误差不超过 0.5Hz
+  2. Iq 启动电流爬坡已经完成，speed_close_loop_flag == 2
+  3. EKF/open-loop 速度比例仍在 0.90-1.10
+  4. EKF/open-loop 角度误差绝对值不超过 0.70rad
+- 若 blend/full EKF 阶段失败，则本次启动保持 FALLBACK，不再反复重新尝试；下一次 KEY1 重新 start 会清零状态。
+
+motor/trace.c
+- diag_flags 新增 bit10：ekf_handoff_target_ok
+```
+
+验证：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 build
+结果：成功
+FLASH: 30272B / 512KB
+RAM: 112504B / 128KB, 85.83%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 flash
+结果：成功，已通过 ST-LINK 烧录并复位
+```
+
+下一轮测试重点：
+
+```text
+1. 继续测 45Hz
+2. 观察在到达 45Hz 前是否不再出现接管抖动
+3. 如果出现一次接管失败，之后应保持稳定开环，不应每秒反复抖
+4. 停机后导出 trace，重点看 bit10、bit7、bit9 的顺序
+```
+
+## 54. 45Hz 目标门槛版复测导出
+
+导出文件：
+
+```text
+build/trace_20260509_45hz_target_gate.csv
+```
+
+导出状态：
+
+```text
+samples=1074
+period=40ms
+覆盖时间约 42.9s
+trace active=0，说明停机后已冻结
+```
+
+diag_flags 统计：
+
+```text
+45    690 samples  motor ready + open-loop + EKF update + angle_ok，尚未到 target_ok/speed_ok
+1085   25 samples  target_ok + speed_ok + angle_ok，但 handoff ready 尚在累计
+1277   41 samples  target_ok + handoff_ready + blend
+1597  257 samples  target_ok + speed_ok + angle_ok + fallback
+1277 = 1024(bit10 target_ok) + 253(bit7 blending 等)
+1597 = 1024(bit10 target_ok) + 573(bit9 fallback 等)
+```
+
+关键时间点：
+
+```text
+30000ms：第一次 target_ok，ol=44.5Hz，EKF=42.4Hz，ratio=0.952
+31000ms：第一次进入 blend，ol=45.0Hz，EKF=43.4Hz，ratio=0.964，phase=0.179rad
+32600ms：仍在 blend，phase 采样为 0.398rad；此前 32560ms 曾到 0.620rad
+32640ms：进入 fallback，ol=45.0Hz，EKF=41.3Hz，ratio=0.917
+42920ms：用户停机，motor=0
+```
+
+结论：
+
+- 新增的目标频率门槛生效：这次没有在 20 多 Hz 爬坡阶段提前接管，而是等到约 30s、接近 45Hz 后才开始 ready/blend。
+- sticky fallback 生效：进入 fallback 后保持开环稳定运行，没有再次每秒反复尝试接管。
+- 这次接管仍未完全成功；blend 持续约 `1.64s` 后 fallback，尚未完成设定的 `2s` blend。
+- 40ms trace 采样点没有抓到真正触发 fallback 的 10kHz 瞬间；但 blend 后半段相位误差已经采样到 `0.620rad`，接近 `0.70rad` 阈值，同时 fallback 后第一点 EKF 速度短暂跌到 `41.3Hz`，所以更像是 EKF 在参与控制后出现瞬态相位/速度扰动，而不是硬件保护或电流环失控。
+
+下一步建议：
+
+```text
+1. 增加 fallback 触发原因锁存：angle_trip / speed_trip / target_trip。
+2. 增加 blend 进度记录，方便判断失败发生在接管百分之多少。
+3. 在不改变硬件安全边界的前提下，下一版可尝试更慢的 blend，或先只混 speed_fdk 不混 theta，验证到底是角度接管扰动还是速度反馈扰动。
+```
+
+## 55. 接管窗口密集 trace 与 fallback 原因锁存
+
+用户补充要求：
+
+```text
+能让日志更清楚的诊断都可以加；
+为了节省 RAM，不需要从 KEY1 启动全程记录；
+等 OL 进入稳定区域、马上要开始接管时再记录；
+记录可以更密集；
+现场会在稳定后继续运行约 30 秒。
+```
+
+设计取舍：
+
+- 原 trace 是 `2048 条 x 40ms`，覆盖约 `82s`，但会浪费大量定位和爬坡阶段数据。
+- 新 trace 改为 `1792 条 x 20ms`，覆盖约 `35.84s`；从接管窗口开始记录，能覆盖 `ready + blend/fallback + 稳定后约 30s`。
+- 记录字段从 `52B` 增到 `64B`，但 buffer 条数减少后 RAM 仍可接受。
+
+代码修改：
+
+```text
+motor/trace.h
+- TRACE_BUFFER_SIZE: 2048 -> 1792
+- TRACE_SAMPLE_DIV: 4 -> 2
+- 采样周期：40ms -> 20ms
+- trace record: 52B -> 64B
+- 新增字段：
+  - handoff_blend
+  - trip_blend
+  - trip_angle_err_rad
+  - trip_speed_ratio
+  - trip_reason
+  - handoff_state
+
+motor/trace.c
+- trace_reset() 后不再立即 active 写入，只 armed。
+- trace_sample_10ms() 在以下条件出现时才开始写入：
+  - ekf_handoff_target_ok != 0
+  - 或 handoff_state 已不是 OPEN_LOOP
+  - 或压缩机进入 fault
+- time_ms 改为接管观察窗口内的相对时间，不再是从 KEY1 按下开始。
+
+motor/adc.c/h
+- 新增 fallback 触发原因锁存：
+  - EKF_HANDOFF_TRIP_TARGET = 0x01
+  - EKF_HANDOFF_TRIP_MIN_HZ = 0x02
+  - EKF_HANDOFF_TRIP_SPEED_LOW = 0x04
+  - EKF_HANDOFF_TRIP_SPEED_HIGH = 0x08
+  - EKF_HANDOFF_TRIP_ANGLE = 0x10
+- fallback 发生瞬间锁存：
+  - ekf_handoff_trip_reason
+  - ekf_handoff_trip_blend
+  - ekf_handoff_trip_angle_error_rad
+  - ekf_handoff_trip_speed_ratio
+
+tools/export-trace.ps1
+- 支持 64B trace record。
+- CSV 新增列：
+  - handoff_blend
+  - trip_blend
+  - trip_angle_err_rad
+  - trip_speed_ratio
+  - trip_reason
+  - handoff_state
+```
+
+验证：
+
+```text
+powershell -NoProfile -Command '$null = [scriptblock]::Create((Get-Content -Raw .\tools\export-trace.ps1)); Write-Host "export script syntax ok"'
+结果：export script syntax ok
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 build
+结果：成功
+FLASH: 31108B / 512KB
+RAM: 120704B / 128KB, 92.09%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 flash
+结果：成功，已通过 ST-LINK 烧录并复位
+```
+
+下一轮现场测试：
+
+```text
+1. 继续测 45Hz。
+2. KEY1 启动后可以照常等它跑到稳定区域。
+3. 稳定后继续运行约 30 秒再 KEY1 停机。
+4. 导出 trace 后重点看 trip_reason：
+   - 0x04：EKF 速度比例瞬间低于阈值
+   - 0x08：EKF 速度比例瞬间高于阈值
+   - 0x10：EKF/open-loop 相位误差越界
+   - 多个 bit 同时出现说明多个条件同一瞬间失效
+5. 同时看 trip_blend，判断失败发生在接管百分之多少。
+```
+
+## 56. 45Hz 密集 trace 首次导出结论
+
+导出文件：
+
+```text
+build/trace_20260509_095513_handoff_dense.csv
+```
+
+导出状态：
+
+```text
+samples=729
+period=20ms
+覆盖时间约 14.58s
+trace active=0，说明停机后已冻结
+```
+
+diag_flags 统计：
+
+```text
+1085   50 samples  target_ok + speed_ok + angle_ok，ready 累计阶段
+1277   82 samples  target_ok + handoff_ready + blend
+1597  596 samples  target_ok + speed_ok + angle_ok + fallback
+8       1 sample   停机后最后一帧
+```
+
+trip_reason 统计：
+
+```text
+0    133 samples  未触发 fallback，包含 ready 和 blend 阶段
+16   596 samples  0x10，EKF/open-loop 相位误差越界
+```
+
+关键时间点：
+
+```text
+0ms：trace 开始记录，ol=44.5Hz，EKF=42.6Hz，ratio=0.958，phase=0.134rad
+1000ms：进入 blend，ol=45.0Hz，EKF=43.0Hz，ratio=0.957，phase=0.033rad，blend=0.007
+2620ms：blend=0.817，phase=0.519rad，ratio=0.962
+2640ms：进入 fallback，trip_reason=16，trip_blend=0.823，trip_angle_err=0.700rad，trip_speed_ratio=0.969
+14560ms：用户停机
+```
+
+分段均值：
+
+```text
+ready 阶段：
+  phase 平均 0.108rad，范围 0.016-0.214rad
+  ratio 平均 0.957，范围 0.952-0.965
+
+blend 阶段：
+  phase 平均 0.225rad，范围 0.033-0.653rad
+  ratio 平均 0.958，范围 0.950-0.969
+  blend 范围 0.007-0.817
+
+fallback 后开环保持：
+  ratio 平均 0.957，最小 0.919
+  电流环仍稳定，Iq/Id 均约 3A
+```
+
+结论：
+
+- 失败原因已经锁定：不是 target 条件、不是最低频率、不是 EKF 速度比例过低/过高，而是 `EKF/open-loop` 相位误差越过 `0.70rad` 阈值。
+- 接管失败发生在 `blend=0.823`，也就是角度已经 82.3% 混到 EKF 时。
+- `trip_speed_ratio=0.969`，说明速度估计当时仍健康；问题集中在 EKF 绝对角度/相位接管，不是速度观测。
+- `Iq/Id` 在 ready、blend、fallback 阶段都稳定在 3A 附近，电流环和开环拖动本身没有失控。
+
+下一步技术判断：
+
+```text
+优先考虑“EKF 角度零点/相位偏置”问题，而不是继续改速度比例阈值。
+下一版可在 handoff 进入 blend 的瞬间锁存 ekf_angle_offset：
+  corrected_ekf_angle = EKF_angle + offset
+  offset = open_loop_angle - EKF_angle
+先保证接管瞬间 corrected_ekf_angle 与 open_loop angle 连续，再观察 blend 后期相位误差是否仍然发散。
+```
+
+## 57. 参考公开方案后实现 theta error ramp 接管
+
+查阅资料后的判断：
+
+```text
+TI MSPM0 Sensorless FOC 文档：
+- 启动参数中有 iqRampEn，用于在切闭环前把 Iq 电流分量降下来以改善 handoff。
+- 也有 thetaErrRampRate，定义为切闭环过程中逐步减小 estimated theta 和 open-loop theta 差值的斜率。
+
+Microchip MCAF startup 文档：
+- 传感器less 启动时先用强制换向角和闭环电流控制拖到可观测速度。
+- 平滑切换方法包括 classic current decay 和 weathervane reference-frame alignment。
+- forced commutation 期间，软件参考系和真实转子参考系可能存在明显角度差，切换要让参考系逐步靠近。
+
+Microchip AN2590：
+- open-loop startup 需要足够高的 startup speed、足够长的 startup time 让估计算法稳定。
+- 状态机里有 Closing loop 阶段，且要求 observer 估计位置与 open-loop rotor angle 足够接近。
+```
+
+结合本项目数据：
+
+```text
+上一次 45Hz 密集 trace：
+- trip_reason=0x10，只是角度越界。
+- trip_blend=0.823，失败发生在接管 82.3%。
+- trip_speed_ratio=0.969，速度估计健康。
+- Iq/Id 均约 3A，电流环健康。
+```
+
+因此本轮不优先改电流、不放宽阈值，而是先实现更接近 `thetaErrRampRate` 的接管方式。
+
+代码修改：
+
+```text
+motor/adc.c/h
+- 新增 ekf_handoff_angle_offset_rad。
+- 进入 BLEND 的瞬间锁存：
+    offset = open_loop_angle - EKF_angle
+- 接管角度改为：
+    theta = EKF_angle + offset * (1 - blend)
+  这样 blend=0 时 theta 与 open-loop angle 连续；
+  blend=1 时 offset 衰减为 0，theta 完全等于 EKF angle。
+- ekf_angle_error_rad 在 blend/full EKF 阶段改为实际 handoff theta 与 open-loop angle 的差，而不是每周期 raw EKF-open 差。
+- 删除旧的 adc_blend_angle()，避免留下无用函数。
+
+motor/trace.c/h
+- 64B record 保持不变，把原 reserved 字段改为 handoff_offset_x1000。
+
+tools/export-trace.ps1
+- CSV 新增 handoff_offset_rad。
+```
+
+验证：
+
+```text
+powershell -NoProfile -Command '$null = [scriptblock]::Create((Get-Content -Raw .\tools\export-trace.ps1)); Write-Host "export script syntax ok"'
+结果：export script syntax ok
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 build
+结果：成功
+FLASH: 31408B / 512KB
+RAM: 120712B / 128KB, 92.10%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 flash
+结果：成功，已通过 ST-LINK 烧录并复位
+```
+
+下一轮现场测试：
+
+```text
+继续 45Hz。
+如果成功，应看到 handoff_state 从 0 -> 1 -> 2，handoff_blend 到 1.000，trip_reason 保持 0。
+如果仍失败，重点看：
+- trip_reason 是否仍为 0x10
+- trip_blend 是否比 0.823 更靠后
+- handoff_offset_rad 是否很大或方向异常
+```
+
+## 58. theta error ramp 版 45Hz 导出
+
+导出文件：
+
+```text
+build/trace_20260509_100303_theta_ramp.csv
+```
+
+导出状态：
+
+```text
+samples=1173
+period=20ms
+覆盖时间约 23.46s
+trace active=0，说明停机后已冻结
+```
+
+diag_flags / handoff_state / trip_reason 统计：
+
+```text
+diag_flags:
+  1085   50 samples  target_ok + speed_ok + angle_ok，ready 累计阶段
+  1277    3 samples  target_ok + handoff_ready + blend
+  1597 1119 samples  target_ok + speed_ok + angle_ok + fallback
+  8       1 sample   停机最后一帧
+
+handoff_state:
+  0      51 samples
+  1       3 samples
+  3    1119 samples
+
+trip_reason:
+  0      54 samples
+  16   1119 samples  0x10，角度越界
+```
+
+关键时间点：
+
+```text
+0ms：trace 开始，ol=44.5Hz，EKF=42.4Hz，ratio=0.953，phase=0.056rad
+1000ms：进入 blend，blend=0.007，handoff_offset=-0.060rad，phase=0.098rad
+1020ms：blend=0.017，phase=0.221rad
+1040ms：blend=0.027，phase=0.533rad
+1060ms：进入 fallback，trip_reason=0x10，trip_blend=0.030，trip_angle_err=0.702rad，trip_speed_ratio=0.989
+23440ms：用户停机
+```
+
+分段均值：
+
+```text
+ready 阶段：
+  phase 平均 0.104rad，范围 0.003-0.214rad
+  ratio 平均 0.958，范围 0.952-0.965
+
+blend 阶段仅 3 个采样点：
+  phase 0.098 -> 0.221 -> 0.533rad
+  blend 0.007 -> 0.017 -> 0.027
+  handoff_offset=-0.060rad
+
+fallback 后：
+  ratio 平均 0.957，电流环仍稳定，Iq/Id 均约 3A
+```
+
+结论：
+
+- 单纯的 `theta = EKF_angle + offset * (1 - blend)` 没有解决问题，反而更早触发角度保护。
+- 这不是 offset 符号明显错误：进入 blend 时 offset 只有 `-0.060rad`，初始角度连续性是好的。
+- 更关键的是 EKF 速度长期约为开环速度的 `95.7%`。锁存 offset 后，修正后的 EKF 角度不再每周期贴着开环角度，因此会按 `45Hz - 43Hz` 左右的速度差很快相对开环漂移；约几十毫秒就能积累到 `0.70rad`。
+- 这说明当前 `EKF/open-loop 相位差 < 0.70rad` 作为 blend 中的保护条件，与“让 EKF 真实角度逐渐接管”本身存在冲突。因为真实 rotor angle 和 forced open-loop angle 在强拖模式下本来就允许存在负载角/滑差。
+
+下一步技术判断：
+
+```text
+不能只做角度零点 offset。
+更像产品级方案的是：
+1. 用 EKF angle 接管时，保留/管理 forced-open-loop 下形成的 torque angle/current-vector offset。
+2. 切换期间不要再把 corrected EKF angle 与 open-loop angle 的差作为唯一硬保护。
+3. 改为监控：
+   - EKF speed ratio 是否仍健康
+   - 电流环 Iq/Id 是否稳定
+   - Vq/Vbus 是否异常
+   - angle error 的变化率/连续性，而不是绝对值必须贴着 open-loop
+4. 或先做 Microchip classic current decay：降低强拖电流，让 open-loop reference 与实际 rotor reference 自然靠近，再进入 EKF。
+```
+
+## 59. 实现行业通用 handoff：theta ramp + 运行健康监控 + Id 衰减
+
+采用方案：
+
+```text
+采用 TI/MSPM0 风格的 thetaErrRampRate 思路：
+- 接管前：仍要求 EKF 速度和 raw EKF/open-loop 相位都通过 ready 门槛。
+- 接管中：锁存 open-loop angle 与 EKF angle 的 offset，并把 offset 按 blend 衰减到 0。
+- 接管中不再把 EKF/open-loop 绝对角度差作为硬 fallback。
+
+结合 Microchip/MCAF 的 startup phasor 分析：
+- forced commutation / open-loop 强拖时，软件参考系与真实转子参考系本来可能存在较大负载角。
+- 切到真实转子参考系时，应逐步减少 forced/open-loop 参考系带来的励磁分量。
+```
+
+代码修改：
+
+```text
+motor/foc_define_parameter.h
+- EKF_HANDOFF_RUNTIME_ANGLE_TRIP = 0
+  运行接管阶段不再用绝对相位差触发 fallback。
+- EKF_HANDOFF_FINAL_ID_CURRENT = 0.0f
+  接管完成后 d 轴电流降到 0A。
+
+motor/adc.c/h
+- 保留上一版 handoff_offset 逻辑：
+    theta = EKF_angle + offset * (1 - blend)
+- 新增 ekf_handoff_id_reference(blend)：
+    Id_ref = 3A + (0A - 3A) * blend
+  即 BLEND 期间 Id 从 3A 线性衰减到 0A，Iq 保持 3A 启动扭矩。
+- BLEND/EKF 阶段：
+    ekf_angle_error_rad 仍然记录实际 handoff theta 与 open-loop angle 的差；
+    ekf_handoff_angle_ok 仍然计算并写入 diag_flags；
+    但 runtime_handoff_bad 只看 ekf_handoff_speed_ok，除非重新打开 EKF_HANDOFF_RUNTIME_ANGLE_TRIP。
+- fallback 仍然 sticky，避免反复冲击。
+```
+
+验证：
+
+```text
+powershell -NoProfile -Command '$null = [scriptblock]::Create((Get-Content -Raw .\tools\export-trace.ps1)); Write-Host "export script syntax ok"'
+结果：export script syntax ok
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 build
+结果：成功
+FLASH: 31308B / 512KB
+RAM: 120712B / 128KB, 92.10%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 flash
+结果：成功，已通过 ST-LINK 烧录并复位
+```
+
+下一轮现场测试：
+
+```text
+继续 45Hz。
+期望：
+- handoff_state: 0 -> 1 -> 2
+- handoff_blend: 到 1.000
+- trip_reason: 保持 0
+- Id 反馈应随接管从约 3A 降向 0A
+- Iq 反馈应继续在约 3A 附近
+- 电源电流/声音/吸力不应出现明显异常
+
+若失败：
+- 如果 trip_reason=0x04/0x08，则说明 EKF 速度健康性不足。
+- 如果没有 fallback 但机械表现异常，则下一步需要增加 current-loop health trip 或放慢 blend。
+```
+
+## 61. 软化两阶段接管：慢 blend + 运行速度健康防抖
+
+上一轮问题：
+
+```text
+health monitor 版没有被角度误差立即误杀，但在 blend=0.131 时触发 fallback。
+trip_speed_ratio=1.100，刚好踩到原速度比例高边。
+说明 EKF 一参与角度控制后速度估计会出现瞬态高边扰动。
+```
+
+本轮策略：
+
+```text
+接管前仍使用严格门槛：
+- target_ok
+- speed ratio 0.90-1.10
+- angle error <= 0.70rad
+- 连续 ready 约 1s
+
+接管中改用更软的运行健康监控：
+- angle error 继续记录，但不作为硬 fallback。
+- runtime speed ratio 宽窗口：0.75-1.25。
+- 超出 runtime speed ratio 宽窗口必须连续 1000 个 FOC tick，约 100ms，才 fallback。
+- angle blend 从 2s 拉长到 8s，降低接管斜率。
+- angle blend 阶段 speed_fdk 保持 open-loop speed；只有 handoff_state 进入 EKF 后才使用 EKF speed_fdk。
+```
+
+代码修改：
+
+```text
+motor/foc_define_parameter.h
+- EKF_HANDOFF_RUN_SPEED_RATIO_MIN = 0.75f
+- EKF_HANDOFF_RUN_SPEED_RATIO_MAX = 1.25f
+- EKF_HANDOFF_BLEND_TICKS = 80000u
+- EKF_HANDOFF_RUNTIME_BAD_TICKS = 1000u
+
+motor/adc.c
+- 新增 ekf_handoff_runtime_bad_ticks。
+- BLEND/EKF 阶段用 runtime_speed_ok 判断持续健康性。
+- speed_fdk 在 BLEND 阶段保持 open-loop speed，EKF 状态后再切到 FOC_Output.EKF[2]。
+```
+
+验证：
+
+```text
+powershell -NoProfile -Command '$null = [scriptblock]::Create((Get-Content -Raw .\tools\export-trace.ps1)); Write-Host "export script syntax ok"'
+结果：export script syntax ok
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 build
+结果：成功
+FLASH: 31520B / 512KB
+RAM: 120712B / 128KB, 92.10%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 flash
+结果：成功，已通过 ST-LINK 烧录并复位
+```
+
+下一轮现场测试：
+
+```text
+继续 45Hz。
+如果成功，trace 应该看到 handoff_blend 缓慢增加，最终到 1.000，handoff_state=2。
+如果失败，重点看：
+- trip_blend 是否明显高于 0.131
+- trip_speed_ratio 是否超过 1.25 或低于 0.75 并持续
+- Id 是否平滑下降，Iq 是否仍稳定
+```
+
+## 62. 8s 软接管版 45Hz 导出
+
+导出文件：
+
+```text
+build/trace_20260509_101156_soft_handoff.csv
+```
+
+导出状态：
+
+```text
+samples=386
+period=20ms
+覆盖时间约 7.72s
+trace active=0
+```
+
+统计：
+
+```text
+handoff_state:
+  0   51 samples
+  1  116 samples
+  3  219 samples
+
+trip_reason:
+  0   167 samples
+  24  219 samples = 0x08 + 0x10
+```
+
+关键时间点：
+
+```text
+1000ms：进入 blend，blend=0.002，EKF=42.7Hz，ratio=0.949，offset=-0.166rad
+1700ms：blend=0.089，EKF=40.6Hz，ratio=0.903
+2080ms：blend=0.137，EKF=44.7Hz，ratio=0.993
+2520ms：blend=0.192，EKF=49.5Hz，ratio=1.101
+3260ms：blend=0.284，EKF=57.0Hz，ratio=1.266
+3320ms：进入 fallback，trip_reason=24，trip_blend=0.292，trip_speed_ratio=1.274，trip_angle_err=-1.148rad
+3340ms 后：EKF 估速飙到 251Hz 以上，Vq/Vd 饱和到 24V，实际 Iq/Id 接近 0A
+7700ms：停机
+```
+
+分段均值：
+
+```text
+ready 阶段：
+  ratio 平均 0.956，phase 平均 0.114rad
+
+blend 阶段：
+  ratio 平均 1.026，范围 0.843-1.266
+  EKF 范围 37.9-57.0Hz
+  blend 范围 0.002-0.289
+  Id 从约 3A 降到约 2.14A
+  Iq 仍约 3A
+
+fallback 后：
+  EKF 和 Vd/Vq 数据失真/饱和，不应用作正常控制依据。
+```
+
+结论：
+
+- 8s 慢接管让系统从上一版 `blend=0.131` 走到 `blend=0.292`，说明软化确实延后了失败。
+- 但失败形态变得更危险：接近 fallback 时 `Vq=11.04V`，随后 `Vq/Vd=24V` 饱和，EKF 估速飙高。
+- 这说明不能继续简单放宽运行窗口，也不能只靠更慢 blend；当前 EKF 角度接管会在中段把电流环/电压输出推向异常。
+
+下一步技术方向：
+
+```text
+停止继续放宽保护。
+退回更保守的产品级 startup 方案：
+Microchip classic current decay / Iq ramp down before handoff。
+
+思路：
+1. 开环 45Hz 稳定后，不立即接 EKF。
+2. 先把启动强拖电流从 3A 缓慢降到较低值，例如 1.5A 或 1.0A。
+3. 观察 EKF/open-loop angle error 是否自然收敛，避免 forced reference frame 与 rotor reference frame 差太大。
+4. 只有低电流下 ratio/angle 连续稳定后，再做 EKF theta handoff。
+5. 如低电流阶段吸力/速度不稳，则说明负载需要较大转矩，不能在当前 12V/45Hz 条件下低扭矩闭环接管，需要提高母线电压或先调压缩机工作点。
+```
+
+## 60. health monitor 接管版 45Hz 导出
+
+导出文件：
+
+```text
+build/trace_20260509_100814_health_handoff.csv
+```
+
+导出状态：
+
+```text
+samples=782
+period=20ms
+覆盖时间约 15.64s
+trace active=0，停机后已冻结
+```
+
+统计：
+
+```text
+diag_flags:
+  1085   50 samples  ready 累计阶段
+  1277    3 samples  blend 且 angle_ok 仍成立
+  1181    8 samples  blend，但 angle_ok 已失效；运行阶段不再因 angle 直接 fallback
+  1213    2 samples  blend，speed_ok/angle_ok 均仍标志存在
+  1565    1 sample   fallback 第一帧，speed_ok 不再成立，angle_ok 也失效
+  1597  717 samples  fallback 后开环保持
+  8       1 sample   停机最后一帧
+
+handoff_state:
+  0   51 samples
+  1   13 samples
+  3  718 samples
+
+trip_reason:
+  0    64 samples
+  24  718 samples = 0x08 + 0x10
+```
+
+关键时间点：
+
+```text
+0ms：trace 开始，ol=44.5Hz，EKF=42.6Hz，ratio=0.958，phase=0.138rad
+1000ms：进入 blend，blend=0.007，handoff_offset=-0.080rad
+1060ms：blend=0.037，EKF=44.6Hz，ratio=0.991，phase=0.748rad；angle_ok 已失效但没有立即 fallback
+1220ms：blend=0.117，EKF=49.0Hz，ratio=1.089
+1240ms：blend=0.127，EKF=49.3Hz，ratio=1.095
+1260ms：进入 fallback，trip_reason=24，trip_blend=0.131，trip_speed_ratio=1.100，trip_angle_err=0.796rad
+```
+
+结论：
+
+- 新策略确实没有因为角度越界立刻 fallback：1060ms 开始 angle 已经超过阈值，但固件继续接管。
+- 真正触发 fallback 的硬条件是 EKF 速度比例高边越界：`trip_speed_ratio=1.100`。
+- 角度越界仍然同时出现，所以 `trip_reason=0x08 + 0x10`，但这次 0x10 不是唯一/主要原因。
+- 接管只到 `blend=0.131`，说明 EKF 在刚开始参与角度/速度反馈后就被扰动；Id 从 3A 已降到约 2.65A，Iq 仍约 3A。
+
+下一步建议：
+
+```text
+优先让接管更软：
+1. 加长 EKF_HANDOFF_BLEND_TICKS，例如从 20000 tick(2s) 改到 80000 tick(8s)。
+2. 或者分两阶段：
+   phase A：只接管 theta，speed_fdk 仍用 open-loop speed，避免速度反馈扰动；
+   phase B：theta 稳定后再慢慢把 speed_fdk 混到 EKF speed。
+
+从当前数据看，phase A/B 分段更有针对性，因为 trip 是 EKF speed ratio 高边触发。
+```
+
+## 61. 8s soft handoff 45Hz 导出
+
+导出文件：
+
+```text
+build/trace_20260509_101156_soft_handoff.csv
+```
+
+关键结果：
+
+```text
+接管推进到 trip_blend=0.292
+trip_reason=24 = 0x08 speed high + 0x10 angle
+trip_speed_ratio=1.274
+trip_angle_err=-1.148rad
+fallback 前 Vq 已接近 11.04V，fallback 后 Vd/Vq 出现饱和迹象
+```
+
+结论：
+
+- 单纯把 angle blend 拉长到 8s、把运行速度窗口放宽到 `0.75-1.25`，不能解决接管问题。
+- 失败发生时 EKF 已被接管过程扰动到速度高估，继续放宽窗口会更危险。
+- 45Hz 开环本身很稳，所以问题不在压缩机能不能转，而在“强 d 轴拖动电流 + EKF 角度接管”之间的参考系切换。
+- 后续停止继续放宽保护，转为更接近工业方案的 staged handoff：先降 d 轴电流，确认低 d 轴条件下 EKF 仍跟得住，再接管角度。
+
+## 62. 回答 EKF wrapper 判断并改为 DECAY 接管前处理
+
+今天复盘 `stm32_ekf_wrapper.c` 的作用：
+
+- 它就是当前工程里的 EKF 观测器实现，FOC 主流程每个控制 tick 都会调用它。
+- 输入是电压、电流和电机参数 `Rs/Ls/flux`，输出是 `FOC_Output.EKF[2]` 速度和 `FOC_Output.EKF[3]` 角度。
+- 30/45/60Hz 开环标定里 EKF 已经分别能跟到约 `29.2/43.1/56.9Hz`，所以可以确认 wrapper 没有缺文件、没有完全没接入。
+- 其它 `R_flux_identification`、`L_identification` 一类接口虽然存在，但没有把结果回填到 EKF 的 `Rs/Ls/flux`，不是当前接不上闭环的主要原因。
+
+代码决策：
+
+```text
+新增 EKF_HANDOFF_STATE_DECAY = 4
+EKF_HANDOFF_DECAY_TICKS = 80000   # 约 8s
+EKF_HANDOFF_FINAL_ID_CURRENT = 0.0A
+EKF_HANDOFF_FINAL_IQ_CURRENT = 2.5A
+```
+
+新的接管顺序：
+
+```text
+OPEN_LOOP：
+  45Hz 开环稳定，EKF/OL ratio 和角度误差连续约 1s 合格
+
+DECAY：
+  仍使用开环角度 hall_angle
+  Id 从 3.0A 慢慢降到 0A
+  Iq 从 3.0A 轻轻降到 2.5A
+  等 DECAY 完成后，如果 EKF 仍连续稳定，再进入 BLEND
+
+BLEND：
+  锁存 angle offset
+  角度从 EKF+offset 慢慢过渡到纯 EKF
+  speed_fdk 仍保持开环速度，减少速度反馈扰动
+
+EKF：
+  角度完全使用 EKF，speed_fdk 才切到 EKF speed
+
+FALLBACK：
+  回到开环角度，但保持低 d 轴电流，避免失败回退瞬间又把 3A d 轴定位电流打回去
+```
+
+下一次实验看点：
+
+- CSV 里 `handoff_state=4` 是否能完整跑完，`handoff_blend` 从 0 到 1 是否平滑。
+- DECAY 末尾 `ekf_speed_ratio` 是否仍在 `0.90-1.10`，`ekf_angle_err_rad` 是否仍小于 `0.70rad`。
+- 如果 DECAY 后迟迟不进入 BLEND，说明低 d 轴电流下 EKF/开环相位不稳定，下一步应先调电流矢量和工作点。
+- 如果能进入 BLEND 但 Vq 再次冲高或 speed_ratio 飙高，再考虑更保守的 PLL/SMO 或完全重写接管逻辑。
+
+## 63. DECAY 接管前处理版 45Hz 导出
+
+导出文件：
+
+```text
+build/trace_20260509_45hz_decay_handoff.csv
+```
+
+导出状态：
+
+```text
+samples=1658
+period=20ms
+覆盖时间约 33.16s
+trace active=0，停机后已冻结
+```
+
+状态统计：
+
+```text
+handoff_state=0    51 samples   # 进入目标频点后的初始 open-loop ready 阶段
+handoff_state=4  1607 samples   # 新增 DECAY 阶段
+handoff_state=1/2/3 0 samples   # 未进入 BLEND/EKF/FALLBACK
+trip_reason=0  全程无 handoff trip
+```
+
+关键观察：
+
+```text
+约 1000ms：进入 DECAY。
+约 8980ms：DECAY 完成，handoff_blend 显示到 1.000。
+DECAY 后段：
+  Id_fb 约 -0.03A 到 0.02A
+  Iq_ref=2.5A，Iq_fb 约 2.47A 到 2.54A
+  EKF/OL ratio 约 0.983 到 1.010，平均约 0.995
+  ekf_angle_err_rad 约 0.474 到 0.862，平均约 0.643
+  Vbus 约 11.39V 到 11.82V
+  Vq 约 1.44V 到 2.49V
+```
+
+结论：
+
+- 新的 DECAY 策略安全：没有触发 `OCTW/FAULT`，软件 handoff trip 也没有触发。
+- 低 d 轴电流下压缩机仍能稳定保持 45Hz，说明 `Id=3A` 不是维持运行的必需条件，后续产品化应尽量避免长期强 d 轴拖动。
+- EKF 速度在 DECAY 后段与开环几乎一致，硬件 U/V/W 相序、PWM A/B/C 映射、EKF 速度方向没有明显反接迹象。
+- 未进入 BLEND 的原因是当前接管 ready 仍要求 `abs(ekf_angle_err_rad) <= 0.70rad` 连续约 1s；DECAY 完成后角度误差常在 `0.70rad` 附近上下摆动，最大到 `0.86rad`，所以 ready 无法连续保持。
+
+下一步建议：
+
+```text
+不要回到“强行放宽所有保护”。
+可以改成 DECAY 后专用接管门槛：
+  1. 速度 ratio 仍严格，例如 0.94-1.06；
+  2. 角度允许窗口临时放宽到 0.90rad；
+  3. 进入 BLEND 时锁存 offset；
+  4. BLEND 期间继续看 Vq、speed_ratio、已有电流/母线保护。
+
+这比直接硬切 EKF 安全，因为本次数据证明速度估计可信，主要卡在低 d 轴后 raw phase error 阈值略紧。
+```
+
+## 64. DECAY 后专用接管门槛版本
+
+根据 `trace_20260509_45hz_decay_handoff.csv` 的结果，代码继续做小范围修改：
+
+```text
+新增参数：
+EKF_HANDOFF_DECAY_SPEED_RATIO_MIN = 0.94
+EKF_HANDOFF_DECAY_SPEED_RATIO_MAX = 1.06
+EKF_HANDOFF_DECAY_ANGLE_ERR_MAX_RAD = 0.90
+EKF_HANDOFF_DECAY_READY_TICKS = 10000
+```
+
+逻辑变化：
+
+```text
+OPEN_LOOP 进入 DECAY：
+  仍使用原严格门槛：
+  speed_ratio = 0.90-1.10
+  abs(angle_err) <= 0.70rad
+  连续约 1s
+
+DECAY 未完成：
+  只降电流，不累计接管 ready
+
+DECAY 完成后：
+  使用低 d 轴专用门槛：
+  speed_ratio = 0.94-1.06
+  abs(angle_err) <= 0.90rad
+  连续约 1s 后再进入 BLEND
+```
+
+改动动机：
+
+- 上一轮 DECAY 后速度非常稳定，`ratio` 约 `0.983-1.010`。
+- 相位误差最大约 `0.862rad`，略高于旧 `0.70rad`，但仍低于 `0.90rad`。
+- 因此不应该继续停在 DECAY，也不应该放宽运行保护；更合适的是只给低 d 轴接管门槛开专用窗口。
+
+本版构建结果：
+
+```text
+FLASH used: 31984 B
+RAM used: 120712 B / 128 KB = 92.10%
+```
+
+## 65. DECAY 后专用门槛版 45Hz 导出
+
+导出文件：
+
+```text
+build/trace_20260509_45hz_decay_gate_blend.csv
+```
+
+导出状态：
+
+```text
+samples=990
+period=20ms
+覆盖时间约 19.8s
+trace active=0，停机后已冻结
+```
+
+状态统计：
+
+```text
+handoff_state=0    51 samples
+handoff_state=4   450 samples   # DECAY
+handoff_state=1    62 samples   # BLEND
+handoff_state=3   427 samples   # FALLBACK
+fault=0 全程无软件故障码
+trip_reason=24 出现 427 samples
+```
+
+关键时间点：
+
+```text
+1000ms：进入 DECAY
+约 10000ms：DECAY 完成并进入 BLEND
+11240ms：回退到 FALLBACK
+```
+
+回退锁存值：
+
+```text
+trip_blend=0.155
+trip_speed_ratio=1.267
+trip_angle_err=-2.508rad
+trip_reason=24 = speed_high + angle
+handoff_offset_rad=-0.504rad
+```
+
+BLEND 阶段统计：
+
+```text
+EKF_Hz: 44.7 -> 57.0Hz
+EKF/OL ratio: 0.993 -> 1.267
+Iq_fb: 2.47 -> 2.53A
+Id_fb: -0.02 -> 0.03A
+Vbus: 11.55 -> 11.72V
+Vq: 1.92 -> 2.39V
+handoff_blend: 0.002 -> 0.155
+```
+
+结论：
+
+- DECAY 后专用门槛有效，固件成功从 `DECAY` 进入 `BLEND`。
+- 进入 BLEND 后电流环仍能跟住，母线和 Vq 也没有先异常，所以不是电流环立即失控。
+- EKF 速度在 EKF 角度开始参与后迅速被带高，从约 `45Hz` 升到 `57Hz`，超过运行窗口后触发 fallback。
+- fallback 第一帧 `Vd/Vq` 到 `24V` 是回退后电流反馈接近 0 导致电流环饱和的结果；真正触发 fallback 的锁存值是上一帧 `trip_speed_ratio=1.267` 与 `trip_angle_err=-2.508rad`。
+
+下一步判断：
+
+```text
+不要继续简单放宽 speed_ratio 或 angle 窗口。
+现在问题不是“门槛不够宽”，而是 EKF 角度一参与，观测速度和相位就被扰动。
+下一版应改为更像 PLL/phase correction 的方式：
+  - 仍保持开环角速度 45Hz；
+  - 不直接把 theta 按 EKF 角度混合；
+  - 只对开环 theta 注入很小的相位校正量；
+  - 限制每秒相位校正速度；
+  - 观察 EKF speed 是否还能保持 45Hz 附近。
+```
+
+## 65A. 自动化上探尝试简记
+
+在 ST-Link 连接状态下，我做过一组自动编译、烧录、运行、停机导出的上探尝试，目的只是摸清 `120Hz+` 开环余量，完整细节不展开，结论如下：
+
+- `1800rpm / 120Hz`、`Id≈3A/Iq≈2.5-3A` 可以稳定运行；用户堵吸气口时会触发软件 `F3` 过流，说明保护有效。
+- `2000rpm / 133Hz` 的电流环开环 FOC 多次在 `125-133Hz` 附近失败，表现为 `F1/F3/F4` 或 EKF 掉速，继续硬推风险变高。
+- 修过一次 SVPWM 过调制缩放问题，并尝试过 PI 输出限幅、Id 衰减、加/减相位补偿、较慢升速等策略；这些能改善某些瞬态，但没把 `133Hz` 变成可靠产品工况。
+- 后续尝试 V/f 电压模式后，`133Hz` 能短时不故障，但 slip/电流/温升不可控；用户观察压缩机外壳已约 `45-50°C`。
+- 用户确认 `OL≈80Hz` 吸力已经满足产品需求，因此停止高频开环上探，收敛到 `30-80Hz` 低速旋钮版。
+
+追加小修：
+
+- 用户确认 EC11 旋钮方向反了，已把 `COMPRESSOR_EC11_DIRECTION` 从 `1` 改为 `-1`。
+
+## 66. 低速产品演示安全版：EC11 30-80Hz 可调
+
+用户反馈：
+
+```text
+压缩机高频开环测试后外壳约 45-50°C。
+当前产品需求下，OL 到 80Hz 左右吸力已经足够。
+不要继续往 120Hz 以上开环硬推，避免压缩机继续发热。
+希望先固化一版可以拧 EC11 旋钮、从 30Hz 到 80Hz 可调的低速版本。
+压缩机当时仍在自己跑，需要让固件不再自启动。
+```
+
+决策：
+
+- 停止本轮 2000rpm/高频开环上探。
+- 把当前固件收敛成低速产品演示版，而不是继续做高频开环测试。
+- 上电后不自动运行，必须按 `KEY1` 才启动。
+- EC11 只允许调 `30-80Hz` 电角频率；8 极 6MD030Z 对应机械 `450-1200rpm`。
+
+代码修改：
+
+```text
+MOTOR_STARTUP_CURRENT = 2.5A
+COMPRESSOR_STARTUP_HOLD_CURRENT = 2.5A
+COMPRESSOR_EC11_MIN_RPM = 450rpm      # 30Hz electrical
+COMPRESSOR_EC11_MAX_RPM = 1200rpm     # 80Hz electrical
+COMPRESSOR_EC11_DEFAULT_RPM = 1200rpm # default 80Hz
+COMPRESSOR_EC11_STEP_RPM = 60rpm      # 4Hz per detent
+COMPRESSOR_EC11_DIRECTION = -1        # encoder direction fixed after bench check
+COMPRESSOR_AUTO_TEST_ENABLE = 0
+COMPRESSOR_AUTO_TEST_HOLD_BOOST_ENABLE = 0
+COMPRESSOR_OPEN_LOOP_STARTUP_BOOST_RPM = COMPRESSOR_EC11_DEFAULT_RPM
+COMPRESSOR_PHASE_CURRENT_LIMIT_A = 6.0A
+COMPRESSOR_OPEN_LOOP_VF_ENABLE = 0
+```
+
+验证：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/vscode-build.ps1 build
+FLASH used: 31404 B
+RAM used: 120736 B / 128 KB = 92.11%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/vscode-build.ps1 flash
+ST-LINK SN: 37FF71064E573436F3CF1243
+Download verified successfully
+MCU Reset
+
+EC11 方向修正后再次 build/flash：
+FLASH used: 31404 B
+RAM used: 120736 B / 128 KB = 92.11%
+Download verified successfully
+MCU Reset
+```
+
+当前烧录结论：
+
+- 复位后压缩机不会自己启动。
+- 默认设定为 `1200rpm / 80Hz`，旋钮可降到 `450rpm / 30Hz`。
+- `KEY1` 启动后最高只会跑到 `80Hz`，不会再被自动测试或 startup boost 拉到 `120Hz+`。
+- 后续如果要继续做闭环，应优先研究“不靠 EKF 直接接管”的低风险方案，例如先用板上的 `VU/VV/VW` 相电压采样做反电动势/PLL 诊断，而不是继续用高频开环硬拖压缩机。
+
+## 67. OLED 页面切换残影修复
+
+用户反馈：运行时按 `KEY2` 切到波形页后，锯齿波显示正常；再切回参数页时，波形像素会残留在参数页上，影响 `rpm/set/ol/ekf/r/q` 显示。
+
+原因判断：
+
+- 参数页只在 `clear_display_flag==0` 时调用 `OLED_Clear()` 并重画静态标签。
+- 从参数页切到波形页、再切回参数页时，原来的 `clear_display_flag` 仍可能是 `1`，所以参数页不会清屏，波形页写过的像素就留在屏幕上。
+- 波形页内部只更新 `0..126` 列，最后一列也可能残留旧 buffer。
+
+代码修改：
+
+```text
+user/oled_display.c:
+  oled_display_handle() 内新增 display_flag_pre
+  一旦 display_flag 变化，就复位 clear_display_flag
+  同时强制刷新顶部 C:run/C:stop 状态
+
+user/oled.c:
+  oled_display() 每次绘制波形后清掉 display_buff[*][127]
+```
+
+验证：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/vscode-build.ps1 build
+FLASH used: 31484 B
+RAM used: 120736 B / 128 KB = 92.11%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/vscode-build.ps1 flash
+Download verified successfully
+MCU Reset
+```
