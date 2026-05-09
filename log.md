@@ -4076,3 +4076,38 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/vscode-build.ps1 flash
 Download verified successfully
 MCU Reset
 ```
+
+## 68. EC11 旋钮步进细化到 10rpm
+
+用户希望速度旋钮分度更细，不再每格 `60rpm` 跳变。
+
+修改：
+
+```text
+COMPRESSOR_EC11_STEP_RPM: 60rpm -> 10rpm
+```
+
+换算：
+
+```text
+6MD030Z = 4 对极
+10rpm mechanical = 10 * 4 / 60 = 0.667Hz electrical
+```
+
+范围仍保持：
+
+```text
+450-1200rpm = 30-80Hz electrical
+```
+
+验证：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/vscode-build.ps1 build
+FLASH used: 31484 B
+RAM used: 120736 B / 128 KB = 92.11%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/vscode-build.ps1 flash
+Download verified successfully
+MCU Reset
+```

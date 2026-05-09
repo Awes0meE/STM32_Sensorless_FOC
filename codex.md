@@ -6,7 +6,7 @@
 
 - 最新安全决策：用户观察到压缩机在高频开环测试后外壳约 `45-50°C`，且 `OL≈80Hz` 的吸力已经满足当前产品需求；停止继续向 `120Hz+` 开环硬推。
 - 当前烧录版本已关闭上电自启动：`COMPRESSOR_AUTO_TEST_ENABLE=0`，复位后不会自动启动压缩机，必须按 `KEY1` 才运行。
-- EC11 旋钮范围已锁定为 `450-1200rpm`，对应 8 极 6MD030Z 的 `30-80Hz` 电角频率；默认值为 `1200rpm / 80Hz`，每格 `60rpm / 4Hz`。用户确认旋钮方向反了，当前已设 `COMPRESSOR_EC11_DIRECTION=-1`。
+- EC11 旋钮范围已锁定为 `450-1200rpm`，对应 8 极 6MD030Z 的 `30-80Hz` 电角频率；默认值为 `1200rpm / 80Hz`，每格 `10rpm / 0.667Hz`。用户确认旋钮方向反了，当前已设 `COMPRESSOR_EC11_DIRECTION=-1`。
 - `COMPRESSOR_OPEN_LOOP_STARTUP_BOOST_RPM` 改为 `COMPRESSOR_EC11_DEFAULT_RPM`，即启动 boost 最高只到 `80Hz`，不再使用 `2000rpm / 133Hz`。
 - 高频 V/f 实验分支已关闭：`COMPRESSOR_OPEN_LOOP_VF_ENABLE=0`。当前版本回到电流环开环 FOC 保持，不使用 110Hz 以上的电压模式。
 - 软件连续相电流保护恢复到 `COMPRESSOR_PHASE_CURRENT_LIMIT_A=6.0A`，快速相电流保护仍为 `10.0A`；`MOTOR_STARTUP_CURRENT` 和运行 `Iq` 保持 `2.5A`，`Id` 定位/运行保持 `3.0A`。
@@ -19,7 +19,7 @@
 - EC11 旋钮硬件：A 相 `PB6`，B 相 `PB7`；OLED CS 已由用户确认是 `PC7`，与 PB7 不冲突。
 - 速度换算：6MD030Z 是 8 极电机，即 4 对极；机械 `1800rpm` 等于电角频率 `120Hz`，机械 `3000rpm` 等于电角频率 `200Hz`。
 - 当前启动逻辑：按 `KEY1` 后 1s 定位，然后开环拉到 EC11 设定目标；当前默认/最高为 `1200rpm / 80Hz`，不再做 `120Hz+` 自动测试或高频 boost。
-- EC11 参数：默认 `1200rpm`，范围 `450-1200rpm`，每格 `60rpm`；旋钮方向已按实测改为 `COMPRESSOR_EC11_DIRECTION=-1`。
+- EC11 参数：默认 `1200rpm`，范围 `450-1200rpm`，每格 `10rpm`；旋钮方向已按实测改为 `COMPRESSOR_EC11_DIRECTION=-1`。
 - 开环斜率：升速 `2Hz/s`，降速 `8Hz/s`。
 - 本分支关闭 `EKF_HANDOFF_BLEND_ENABLE`，EKF 只做 OLED/trace 诊断，不参与驱动角度。
 - OLED 默认直接显示参数页，不再先显示 logo；`KEY2` 只在参数页/扩展页之间切换。参数页：`rpm:` 当前开环机械转速，`set:` EC11 设定 rpm，`ol:` 当前电角 Hz，`ekf:` EKF Hz，`r/q` 为 q 轴命令和反馈电流。
