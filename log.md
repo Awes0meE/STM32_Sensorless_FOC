@@ -773,7 +773,713 @@ OLED 状态 = C:run
 - 这一版适合推送到 GitHub 作为后续调参基线。
 - 后续优化应围绕降低抖动、确认真实转速、调开环斜坡、显示实际/命令电流分离、再逐步提高电压和速度展开。
 
-## 18. 给后续博客的素材线索
+## 18. Step 6：重复启动验证失败，降低起步随机性
+
+按计划做 5 次重复启动验证后，结果不稳定。
+
+我的反馈数据：
+
+```text
+5 次启动中只有 1 次成功
+失败时 EKF 一开始往上爬到约 10
+随后 EKF 立刻掉到约 3
+Iq 爬到 2A 多
+随后 Iq 掉到约 1.49A
+过一会儿触发 C:fault / F4
+```
+
+判断：
+
+- 开环强拖方向是对的，但上一版仍然有较大启动随机性。
+- EKF 能爬到 10 后掉到 3，说明转子没有稳定跟上开环斜坡。
+- 继续使用 `2-18 Hz`、`3 Hz/s` 的开环斜坡偏激进，容易把转子拖丢。
+- 启动峰值电流继续冲到 2A 多，但没有换来稳定跟随，说明应优先放慢拖动节奏，而不是继续加电流。
+
+同步代码修改：
+
+```text
+motor/foc_define_parameter.h
+- MOTOR_STARTUP_CURRENT 从 3.0A 降到 2.1A
+- 新增 COMPRESSOR_STARTUP_HOLD_CURRENT = 1.5A
+- 新增 COMPRESSOR_OPEN_LOOP_ALIGN_MS = 1200ms
+- 开环强拖从 2-18Hz / 3Hz/s 改为 1-12Hz / 1Hz/s
+- 启动检查窗口从 20s 延长到 30s
+
+motor/adc.c
+- 新增 compressor_open_loop_ticks
+- 启动前 1.2s 固定电角度，对齐转子
+- 对齐后再慢速开环旋转
+- Iq 爬升到 2.1A 后回落并保持 1.5A，而不是继续沿用 3A 峰值
+```
+
+下一次验证目标：
+
+- 仍然做 5 次启动循环。
+- 成功标准不是跑更快，而是至少显著提高启动成功率，并降低“EKF 到 10 又掉到 3”的掉同步概率。
+
+## 19. Step 6 复测：固定角度对齐版本过保守，撤销对齐
+
+烧录“1.2s 固定角度对齐 + 1-12Hz 慢拖 + 2.1A 峰值”版本后测试，结果比上一版更差。
+
+我的反馈数据：
+
+```text
+按 KEY1 后压缩机没有任何动静
+Iq 爬到 2.1A 后掉到 1.5A
+EKF 全程为 0，没有变化
+OCTW/FAULT 都不亮
+最后 C:fault / F4
+台架电源最高约 200mA
+Iq 掉下来后电源约 110mA
+```
+
+判断：
+
+- 这版代码策略有问题，不应继续沿用。
+- 固定角度对齐阶段没有让压缩机进入有利启动位置，反而使启动过程没有任何可感知运动。
+- `EKF=0` 全程不动，说明转子没有被实际拖起来；这不是保护阈值问题。
+- `2.1A` 峰值在当前开环策略下太保守，命令电流爬升但没有换来实际运动。
+
+同步代码修改：
+
+```text
+motor/foc_define_parameter.h
+- MOTOR_STARTUP_CURRENT 恢复到 3.0A
+- COMPRESSOR_STARTUP_HOLD_CURRENT 保持 1.5A
+- 撤销固定角度对齐：COMPRESSOR_OPEN_LOOP_ALIGN_MS = 0
+- 开环强拖恢复到 2-18Hz
+- 开环斜率保持较慢的 1Hz/s，避免上一版 3Hz/s 太容易拖丢
+```
+
+下一次验证目标：
+
+- 验证无固定对齐、3A 峰值、慢斜坡能否重新产生真实机械运动。
+- 重点看 EKF 是否从 0 动起来，以及是否还出现“到 10 又掉 3”的失步。
+
+## 20. Step 6 再复测：低速强拖思路陷入循环，切到强启动诊断
+
+继续测试“无固定对齐、3A 峰值、2-18Hz 慢斜坡”版本后，仍然无法可靠起转。
+
+我的反馈数据：
+
+```text
+Iq 最高爬到 2.5A
+EKF 最高爬到 10
+随后 Iq 立刻掉到 1.5A
+EKF 掉到 2-3
+过一会儿 C:fault / F4
+手摸压缩机几乎没感觉到转起来
+吸气口没有吸力
+```
+
+判断：
+
+- 低速几百毫安、低开环频率的策略已经陷入循环，不能继续只微调斜率。
+- 压缩机需要进入更接近正常工作区间，才可能稳定建立流体和反电动势。
+- 商品驱动板的启动思路通常不是让压缩机长期停在几百毫安附近，而是先把电流和速度拉到可运行区间。
+- 因此下一版切换为“强启动诊断版”，目标是验证更接近正常工作区的启动是否更可靠。
+
+同步代码修改：
+
+```text
+motor/foc_define_parameter.h
+- 默认速度目标从 30Hz 提高到 120Hz 电频率
+- 速度范围改为 120-200Hz 电频率，对 4 对极约 1800-3000rpm 机械转速
+- 启动 Iq 峰值从 3.0A 提高到 3.5A
+- 起转后保持 Iq 从 1.5A 提高到 3.0A
+- Iq 爬升斜率提高到 1A/s
+- 开环强拖改为 5-120Hz，斜率 15Hz/s
+- 堵转阈值保持 10Hz 电频率，启动检查窗口 30s
+```
+
+测试要求：
+
+- 台架电源先设 `12V / 2A` 限流，不要一开始放到 4A。
+- 按 `KEY1` 后只观察一次，不做 5 次循环。
+- 如果电源进入限流、压缩机剧烈撞击、板子异响、OCTW/FAULT 亮，立即停止。
+
+这次验证的关键不是省电，而是确认强启动能否让压缩机真实起转并产生吸力。
+
+## 21. Step 6 强启动复测：命令电流上去了，但没有形成真实旋转
+
+烧录“120Hz 目标、3.5A 峰值、3.0A 保持、5-120Hz 开环强拖”诊断版后，压缩机有更明显动静，但仍然没有真实进入压缩运行。
+
+我的反馈数据：
+
+```text
+Iq 到 3A 时，压缩机明显有动静
+感觉没有在转，而是在原地抖
+有一个人耳能听到的固定频段振动声
+吸气口没有吸力
+电源电压没有掉
+电源没有限流
+Iq 最后稳定在 3.0
+EKF 没有超过 10，最后掉到 2
+台架电源最高约 500mA
+最后仍然 C:fault / F4
+```
+
+判断：
+
+- 这次不是“电流再加一点就好”的问题，而是控制策略和诊断信息不够了。
+- OLED 原先显示的 `Iq` 是 `FOC_Input.Iq_ref`，也就是命令电流，不是实际 q 轴反馈电流。
+- 屏幕显示 3A，但台架电源只有约 500mA、没有吸力、EKF 锁不住，说明“命令 Iq”没有可靠转化成有效电磁转矩。
+- 固定频段抖动通常意味着转子被定子磁场拉扯，但没有跟随旋转磁场建立连续转动。
+- 下一步不能再盲目提高电流或速度，应先确认电流采样、Park 变换、相序、开环角度方向、电流环极性是否一致。
+
+同步代码修改：
+
+```text
+motor/foc_algorithm.h
+- 导出 Current_Idq，允许 OLED 页面读取实际 dq 电流反馈。
+
+user/oled_display.c
+- OLED 第 2 页底行从只显示命令 Iq，改为同时显示：
+  r: 命令 q 轴电流 FOC_Input.Iq_ref
+  q: 实际 q 轴反馈电流 Current_Idq.Iq
+- 保留 tgt、ekf 和 F 故障码显示。
+```
+
+编译与烧录：
+
+```text
+Build firmware 成功
+FLASH: 25736 B / 512 KB
+RAM: 5936 B / 128 KB
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+```
+
+下一次验证目标：
+
+- 只做一次短启动，不再连续反复试。
+- 重点记录 `r:` 和 `q:` 的关系。
+- 如果 `r:` 到 3A 而 `q:` 接近 0 或乱跳，优先排查电流采样/相序/电流环方向。
+- 如果 `q:` 能跟上 3A 但仍只抖不转，优先排查开环旋转方向、相序、机械负载和启动算法。
+
+## 22. Step 7：用 GE2117 说明书反推启动策略
+
+烧录诊断显示版后，继续测试强启动。
+
+我的反馈数据：
+
+```text
+未按 KEY1 时 r=0，q=0
+按 KEY1 后 r 最高到 3，q 最高到 3
+r 和 q 两个数字几乎同步
+EKF 最高到 3，之后掉到 0
+台架电源最高约 330mA，没有限流
+机械现象：无吸力、无明显撞击声、基本没动静
+最后 F4
+DRV OCTW/FAULT 都不亮
+```
+
+判断：
+
+- q 轴电流反馈能跟随命令值，说明这次不是简单的“电流环完全不跟随”。
+- 但 EKF 几乎没有速度、母线功率很低、机械没有吸力，说明电流矢量没有形成有效连续转矩。
+- 现在最可疑的是启动算法：未知转子位置下直接给 q 轴电流并旋转角度，可能只是在数学坐标里“q=3A”，但物理转子并没有进入可跟随的初始位置。
+
+从 `GE2117-V2_压缩机驱动板说明书.pdf` 读到的可模仿点：
+
+```text
+上电后等待 10s
+接到启动信号后，无论设定速度多少，先以 3000rpm 初始化启动
+稳定在 3000rpm 速度 10s 后，再逐步闭环到设定速度
+启动前定位时间默认 1000ms
+启动 Lq 电流默认 3.00A
+启动 Ld 电流默认 3.00A
+有低速力矩补偿、最大功率限制、堵转/缺相保护
+```
+
+同步代码修改：
+
+```text
+motor/foc_define_parameter.h
+- MOTOR_STARTUP_CURRENT 从 3.5A 改为 3.0A，对齐 GE2117 默认 Lq 启动电流
+- 新增 COMPRESSOR_STARTUP_ID_CURRENT = 3.0A，对齐 GE2117 默认 Ld 启动电流
+- Iq 爬升斜率改为 3A/s，让 1s 定位后更快进入 3A 启动段
+- 启动前定位改为 1000ms
+- 开环强拖改为 20-200Hz，斜率 35Hz/s
+- 200Hz 电频率对应 4 对极约 3000rpm，模仿 GE2117 的 3000rpm 初始化启动
+- 启动检查窗口改为 10s
+- 堵转判定速度改为 40Hz 电频率
+- 新增 COMPRESSOR_OPEN_LOOP_DIRECTION，后续可快速反向测试
+
+motor/adc.c
+- 新增 compressor_is_aligning()
+- 启动前 1s 使用固定电角度，并给 Id=3A、Iq=0A 进行 d 轴定位
+- 定位结束后，启动阶段保持 Id=3A，同时 Iq 从 0A 爬升到 3A
+- 启动阶段一直使用开环角度，不再让 EKF 在低速/未锁定时提前接管
+- 撤销末尾无条件清零 Id_ref，避免定位电流被覆盖
+```
+
+编译与烧录：
+
+```text
+Build firmware 成功
+FLASH: 25768 B / 512 KB
+RAM: 5936 B / 128 KB
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+```
+
+下一次验证目标：
+
+- 这版不是为了省电，而是验证“先 d 轴定位，再 3000rpm 初始化启动”的商品板式策略是否能让转子真正跟上。
+- 按 KEY1 后前 1s 看到 `r:` 约为 0 属于正常，因为那一秒在做 d 轴定位。
+- 1s 后 `r:` 应爬到 3A，`q:` 应跟随。
+- 如果仍然完全不动，下一步优先把 `COMPRESSOR_OPEN_LOOP_DIRECTION` 改成 `-1.0f` 做反向启动测试。
+
+## 23. Step 7 复测：正向 GE2117 仿启动仍未起转，切反向测试
+
+烧录“1s d 轴定位 + 20-200Hz 正向开环 + Id/Iq 3A”版本后测试。
+
+我的反馈数据：
+
+```text
+前 1 秒有轻微定位动静/吸附感
+1 秒后 r 最高 3，q 最高 3
+EKF 最高仍然只到 3，十几秒后掉到 0
+电源最高约 617mA，没有限流
+压缩机能感受到轻微震动
+没有感受到连续转动
+气口无吸力
+最后 F4
+OCTW/FAULT 不亮
+```
+
+判断：
+
+- 定位阶段有吸附感，说明 d 轴定位确实作用到了转子。
+- 旋转阶段 q 轴电流仍能跟随，但转子没有跟上旋转磁场。
+- 这比上一轮更支持“旋转方向/相序组合不匹配”的假设。
+- 下一步只改一个变量：反转开环角度方向，保持电流、定位时间、目标速度都不变，便于判断方向是否是主因。
+
+同步代码修改：
+
+```text
+motor/foc_define_parameter.h
+- COMPRESSOR_OPEN_LOOP_DIRECTION 从 1.0f 改为 -1.0f
+
+codex.md
+- 同步记录当前正在测试反向开环启动。
+```
+
+编译与烧录：
+
+```text
+Build firmware 成功
+FLASH: 25772 B / 512 KB
+RAM: 5936 B / 128 KB
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+```
+
+下一次验证目标：
+
+- 同样只做一次短启动。
+- 如果反向后 EKF 明显上升、压缩机有吸力或能连续转，说明方向/相序是主问题。
+- 如果反向后仍无连续转动，下一步应转向检查相线/电流采样对应关系，或做低风险六步/定子磁场相序诊断。
+
+## 24. Step 7 反向复测：方向反了，改为定位后再柔性爬升
+
+烧录 `COMPRESSOR_OPEN_LOOP_DIRECTION=-1.0f` 反向开环测试版后，结果更差。
+
+我的反馈数据：
+
+```text
+感觉方向反了
+前 1 秒定位吸附感还在
+1 秒后压缩机发出比较大的嗡嗡声
+压缩机原地震，不转
+吸气口没有吸力
+EKF 一直是 0，没动过
+最后 F4
+```
+
+判断：
+
+- 反向比正向更差，`COMPRESSOR_OPEN_LOOP_DIRECTION=-1.0f` 基本可以判定不是正确启动方向。
+- 正向至少曾经让 EKF 有微弱响应，因此恢复 `+1.0f`。
+- 上一版还暴露了一个启动节奏问题：定位期间虽然 OLED 的 `r:` 显示为 0，但内部 `Iq_ref` 仍在爬升，1s 定位结束时 q 轴命令会瞬间跳到 3A。
+- 这个 q 轴阶跃可能直接把刚定位好的转子踢丢，造成嗡嗡震动而不是连续跟随。
+
+同步代码修改：
+
+```text
+motor/foc_define_parameter.h
+- 新增 COMPRESSOR_STARTUP_RUN_ID_CURRENT = 0.0A
+- COMPRESSOR_OPEN_LOOP_DIRECTION 从 -1.0f 恢复为 1.0f
+- 开环起始频率从 20Hz 降到 2Hz
+- 开环斜率从 35Hz/s 降到 20Hz/s
+- 启动检查窗口从 10s 延长到 15s
+
+motor/adc.c
+- 定位期间强制 Iq_ref = 0，并保持 speed_close_loop_flag = 0
+- 定位期间 FOC_Input.speed_fdk = 0
+- 定位阶段使用 Id=3A、Iq=0A
+- 定位结束后改为 Id=0A、Iq 从 0A 爬升到 3A
+```
+
+编译与烧录：
+
+```text
+Build firmware 成功
+FLASH: 25872 B / 512 KB
+RAM: 5936 B / 128 KB
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+```
+
+下一次验证目标：
+
+- 按 KEY1 后前 1s 仍应有定位吸附感，`r:` 应保持 0。
+- 1s 后 `r:` 不应瞬间跳到 3，而应在约 1s 内从 0 爬到 3。
+- 机械上如果策略有效，应先出现更低频、更连续的拖动感，而不是立刻大声嗡嗡。
+- 如果仍然只震不转，下一步不再继续调启动参数，应进入相线/电流采样映射诊断。
+
+## 25. Step 7 慢爬复测：Iq 仍然太快，改成慢拖观察版
+
+烧录“正向、2Hz 起拖、Iq 定位后再爬升”版本后测试，结果比反向更有信息量，但仍未起转。
+
+我的反馈数据：
+
+```text
+前 1 秒有定位吸附感
+r 在定位阶段保持 0
+1 秒后 r 从 0 线性爬到 3
+但 r 约 1 秒内就爬满，仍然太快
+压缩机基本不动
+EKF 最高到 10
+r 从 0 爬到 3 后，EKF 立刻又掉回 2-3
+电源最高 300mA 多，没有限流
+无吸力
+最后 F4
+```
+
+判断：
+
+- 定位后不再是瞬间阶跃，方向也恢复正确，因此 EKF 能短暂到 10。
+- 但 `Iq` 在约 1 秒内爬到 3A，仍然把转子拉丢。
+- 当前掉同步发生在“q 轴电流爬满 + 开环频率继续上升”的组合附近。
+- 下一步要明显放慢 `Iq` 和开环频率，记录掉同步发生时的开环频率，而不是继续猜。
+
+同步代码修改：
+
+```text
+motor/foc_define_parameter.h
+- COMPRESSOR_STARTUP_IQ_RAMP_A_S 从 3.0A/s 降到 0.375A/s，约 8s 爬到 3A
+- COMPRESSOR_OPEN_LOOP_MAX_HZ 从 200Hz 降到 120Hz
+- COMPRESSOR_OPEN_LOOP_RAMP_HZ_S 从 20Hz/s 降到 5Hz/s
+- COMPRESSOR_STARTUP_CHECK_MS 从 15s 延长到 30s
+- COMPRESSOR_STALL_CONFIRM_MS 从 2s 延长到 3s
+- COMPRESSOR_STALL_SPEED_HZ 从 40Hz 降到 20Hz
+
+motor/adc.c / motor/adc.h
+- 将 compressor_open_loop_speed_hz 从 adc.c 私有静态变量改为可外部读取的全局变量。
+
+user/oled_display.c
+- OLED 第 2 页第一行从 tgt 改为 ol，显示当前开环拖动电频率。
+```
+
+编译与烧录：
+
+```text
+Build firmware 成功
+FLASH: 25852 B / 512 KB
+RAM: 5936 B / 128 KB
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+```
+
+下一次验证目标：
+
+- 观察 `ol:`、`ekf:`、`r:`、`q:` 四个量。
+- 重点记录 EKF 是在 `ol` 多少 Hz、`r` 多少 A 时开始掉下去。
+- 如果 `ol` 很低、`r/q` 也很低时仍掉同步，下一步应进入相线/电流采样映射诊断。
+- 如果慢拖能让 EKF 稳定上升，再继续优化斜率和启动接管条件。
+
+## 26. Step 8：加入 RAM trace 黑匣子
+
+我提出一个问题：既然 ST-Link 一直插着，能不能让 Codex 直接开调试、自己读取变量，而不是我盯 OLED 手动反馈。
+
+评估结论：
+
+- 直接用 GDB 变量窗口边跑边读不适合 FOC，因为普通调试读变量经常会暂停 MCU，可能破坏 PWM/电流环实时性。
+- 更稳的方案是在固件里加 RAM trace 环形缓冲区，让 MCU 自己按固定周期记录关键变量。
+- 测试结束后，再用 ST-Link/GDB 一次性把 RAM dump 出来转 CSV，这样不会干扰启动过程。
+
+同步代码修改：
+
+```text
+motor/trace.h
+- 新增 TRACE_RECORD_DEF，一条记录 32 字节。
+- 新增 TRACE_META_DEF，保存 magic、write_index、wrapped、sample_count、active、buffer_size、record_size、sample_period_ms。
+- trace_buffer 大小 2048 条。
+- 采样周期 20ms，最多记录约 40.96s。
+
+motor/trace.c
+- 新增 trace_reset()：按 KEY1 启动时清空 trace 并开始记录。
+- 新增 trace_sample_10ms()：在 10ms 低速任务中调用，每 20ms 实际写入一条。
+- 记录字段包括：
+  time_ms
+  ol_hz
+  ekf_hz
+  Iq_ref / Iq_fb / Id_fb
+  Ia / Ib / Ic
+  Vbus
+  Vd / Vq
+  hall_angle
+  compressor_state / fault / motor_start_stop / speed_close_loop_flag
+- 故障或停机后自动冻结 trace，避免后续空闲数据覆盖启动过程。
+
+motor/low_task.c
+- motor_start() 中调用 trace_reset()。
+- SysTick 10ms 任务中调用 trace_sample_10ms()。
+
+motor/foc_algorithm.h
+- 导出 Voltage_DQ，供 trace 记录 Vd/Vq。
+
+tools/vscode-build.ps1
+- 将 motor/trace.c 加入 GCC 构建源文件。
+
+tools/export-trace.ps1
+- 新增 ST-Link/GDB RAM dump 脚本。
+- 脚本会启动 ST-LINK_gdbserver，连接 GDB，halt MCU，dump trace_buffer 和 trace_meta，再解析为 CSV。
+- 由于 arm-none-eabi-gdb 对中文路径处理不好，脚本会先把 ELF 和临时 dump 放到 `%TEMP%\stm32_trace` 纯 ASCII 路径。
+
+.vscode/tasks.json
+- 新增 `Export trace CSV` 任务。
+```
+
+验证：
+
+```text
+Build firmware 成功
+FLASH: 27320 B / 512 KB
+RAM: 71512 B / 128 KB
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+export-trace.ps1 冒烟测试成功
+空记录测试输出 samples=0，说明 GDB dump 和 CSV 解析链路可用
+随后执行 Reset target 恢复目标板运行
+```
+
+下一次测试流程：
+
+1. 上电，按 `KEY2` 切到参数页。
+2. 按 `KEY1` 启动，让固件自己记录。
+3. 等它 F4，或出现需要停机的现象后不要立刻断板子电。
+4. 告诉 Codex “跑完了，导出 trace”。
+5. Codex 运行 `tools/export-trace.ps1` 导出 CSV 并分析掉同步点。
+
+## 27. Step 8 trace 首次实测：电流跟得上，但转子没跟住
+
+慢拖观察版跑到 `F4` 后，使用 `tools/export-trace.ps1` 导出 RAM trace。
+
+导出结果：
+
+```text
+Trace CSV: build/trace_latest.csv
+samples = 1500
+period_ms = 20
+覆盖时间约 30s
+wrapped = 0，说明没有覆盖旧数据
+fault = 4，最后进入堵转故障
+```
+
+关键统计：
+
+```text
+EKF 最大值：4.7Hz
+EKF 最大值发生时：time=9140ms, ol=42.7Hz, r=3.00A, q=3.00A
+r/q 平均误差：约 0.006A
+母线电压范围：11.67V - 12.04V
+Vd 最大绝对值：0.73V
+Vq 最大绝对值：0.80V
+首次 F4：time=29980ms, ol=120Hz, ekf=1.1Hz, r=3.00A, q=3.02A
+```
+
+阈值点：
+
+```text
+r>=0.5A: time=2320ms, ol=8.7Hz,  ekf=1.0Hz
+r>=1.0A: time=3660ms, ol=15.3Hz, ekf=2.0Hz
+r>=1.5A: time=4980ms, ol=21.9Hz, ekf=2.7Hz
+r>=2.0A: time=6320ms, ol=28.6Hz, ekf=3.6Hz
+r>=2.5A: time=7660ms, ol=35.3Hz, ekf=2.9Hz
+r>=3.0A: time=8980ms, ol=41.9Hz, ekf=4.1Hz
+```
+
+判断：
+
+- 电流环不是主要问题，`q` 几乎完全跟随 `r`。
+- 母线没有掉压，台架电源不是主要限制。
+- `Vq` 远没有顶到 12V 母线附近，电压输出没有饱和。
+- 真正的问题是转子没有跟住开环磁场；当 `r` 还没足够大时，`ol` 已经爬到较高电频率。
+- 之前把启动阶段 `Id` 关掉可能也不符合 GE2117 参数表中的 `Ld=3A, Lq=3A` 启动方式。
+
+同步代码修改：
+
+```text
+motor/foc_define_parameter.h
+- COMPRESSOR_STARTUP_RUN_ID_CURRENT 从 0.0A 改为 3.0A
+- 开环起始频率从 2Hz 降到 1Hz
+- 开环最高频率从 120Hz 降到 60Hz
+- 开环斜率从 5Hz/s 降到 1.5Hz/s
+- 启动检查窗口从 30s 延长到 40s
+- 堵转速度阈值从 20Hz 降到 8Hz
+
+README.md / codex.md
+- 同步记录当前为低频 Ld+Lq 慢启动诊断档。
+```
+
+编译与烧录：
+
+```text
+Build firmware 成功
+FLASH: 27328 B / 512 KB
+RAM: 71512 B / 128 KB
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+```
+
+下一次验证目标：
+
+- 这版的目标不是直接冲到 3000rpm，而是确认转子能否在 `1-20Hz` 电频率附近跟上开环磁场。
+- 如果这版仍然只有电流跟随、EKF 不动，下一步应优先检查相线与电流采样映射，而不是继续调启动斜坡。
+
+## 28. Step 8 二次 trace：中段能跟，闭环接管瞬间打崩
+
+我观察到：中间 `ol` 20 多 Hz 的时候转得挺好，后面才丢步。重新检查 trace 后，确认这个观察是对的。
+
+关键时间线：
+
+```text
+12580ms: ol=18.4Hz, ekf=18.7Hz, Id=3.00A, Iq=3.01A, state=STARTING
+20580ms: ol=30.4Hz, ekf=25.6Hz, Id=3.00A, Iq=3.00A, state=STARTING
+30580ms: ol=45.3Hz, ekf=36.6Hz, Id=3.00A, Iq=3.01A, state=STARTING
+39900ms: ol=59.2Hz, ekf=47.7Hz, Id=2.98A, Iq=2.98A, state=STARTING
+40000ms: ol=59.4Hz, ekf=286.1Hz, r=-1.98A, q=-0.17A, Id=-0.23A, Vq=24.00V, state=RUNNING
+```
+
+分段统计：
+
+```text
+ol=18-40Hz 区间：
+- EKF 平均约 25.2Hz
+- EKF 最大约 33.0Hz
+- ol 与 EKF 平均差约 4.0Hz
+
+ol=40-59Hz 区间：
+- EKF 平均约 39.8Hz
+- EKF 最大约 47.7Hz
+- ol 与 EKF 平均差约 9.6Hz
+```
+
+判断修正：
+
+- 不能再说“转子根本没跟住开环磁场”，更准确的说法是：低频/中频开环阶段已经能跟住一部分，而且体感能转；真正失控发生在 `STARTING -> RUNNING` 的闭环接管瞬间。
+- 40s 启动检查通过后，状态机切到 `RUNNING`，控制分支从开环角度切到 EKF/速度闭环。
+- 切换瞬间 `Id` 从 3A 掉到 0A，`EKF` 出现 286Hz 尖峰，速度环输出打到负电流，`Vq` 顶到 24V，上一次稳定开环被直接打崩。
+- 这说明下一步重点不是再加启动电流，而是延后/取消粗暴闭环接管，先证明开环保持能否稳定运行。
+
+同步代码修改：
+
+```text
+motor/foc_define_parameter.h
+- 新增 COMPRESSOR_OPEN_LOOP_HOLD_ENABLE = 1
+- COMPRESSOR_OPEN_LOOP_MAX_HZ 从 60Hz 降到 45Hz，停在 trace 显示较稳定的区间附近。
+
+motor/adc.c
+- 在 COMPRESSOR_OPEN_LOOP_HOLD_ENABLE 启用时，RUNNING 状态也继续走开环强拖分支。
+- 这样 40s 状态切到 RUNNING 后，不再立刻切 EKF/速度闭环，也不会把 Id 从 3A 清掉。
+
+README.md / codex.md
+- 同步记录当前为开环保持诊断版。
+```
+
+编译与烧录：
+
+```text
+Build firmware 成功
+FLASH: 27336 B / 512 KB
+RAM: 71512 B / 128 KB
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+```
+
+下一次验证目标：
+
+- 让压缩机跑到 `ol=45Hz` 附近后保持。
+- 如果它能一直稳定转、有吸力、不再 40s 后打崩，就证明主问题是闭环接管策略。
+- 若开环保持也丢步，再回头看 trace 判断是 45Hz 本身过高，还是机械负载/相序/采样映射问题。
+
+## 29. Step 9：45Hz 开环保持稳定运行，EKF 估计不可信
+
+烧录“45Hz 开环保持诊断版”后测试，压缩机表现明显变好。
+
+我的反馈数据：
+
+```text
+感觉转的一点问题都没有
+吸力非常稳定，而且很有劲
+期间用手指堵了几次吸气口，能感受到明显吸力
+台架电源电流稳定在约 1A
+没有异常
+测试后手动停机，未复位，导出 trace
+```
+
+导出结果：
+
+```text
+Trace CSV: build/trace_openloop_stable.csv
+samples = 2048
+period_ms = 20
+wrapped = 1
+覆盖最后约 41s
+active = 0，说明停机后 trace 已冻结
+```
+
+稳定区间统计：
+
+```text
+ol 平均/保持：45.0Hz
+EKF 平均：-21.57Hz
+EKF 范围：-24.80Hz 到 -18.10Hz
+Iq_ref 平均：3.00A
+Iq_fb 平均：3.00A，范围 2.95A 到 3.07A
+Id_fb 平均：3.00A，范围 2.92A 到 3.09A
+Vbus 平均：11.62V，范围 11.43V 到 11.83V
+Vd 平均：0.08V，范围 -0.76V 到 0.91V
+Vq 平均：2.40V，范围 1.75V 到 2.76V
+Iq 平均误差：约 0.010A
+```
+
+判断：
+
+- 当前硬件、相线、功率级和电流环已经可以让压缩机在 12V 下稳定开环运行。
+- 45Hz 电频率、`Id=3A/Iq=3A` 是目前实测稳定、有吸力的安全工作点。
+- 电源电流约 1A，结合 trace 中 `Vbus≈11.62V`、`Vq≈2.4V`，说明这不是虚假的 OLED 显示，而是真实在做功。
+- 但 EKF 在稳定运行时长期显示约 `-21Hz`，与开环命令 `ol=45Hz` 方向和幅值都不一致。
+- 因此上一轮闭环接管炸掉，根因不只是切换瞬间太粗暴，更重要的是 EKF 当前估计值不能直接用于速度闭环/角度闭环。
+
+阶段结论：
+
+- 当前应把“45Hz 开环保持”作为新的安全基线。
+- 在 EKF 的方向、尺度、参数和输入符号校正前，不应再让固件自动切入 EKF/速度闭环。
+- 下一步应围绕 EKF 校准展开：确认 `Voltage_Alpha_Beta`、`Current_Ialpha_beta`、`Rs/Ls/flux`、相序和速度符号，使 EKF 在开环稳定运行时至少满足方向一致、量级接近。
+
+## 30. 给后续博客的素材线索
 
 这套项目适合写成一个分阶段博客系列：
 

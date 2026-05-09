@@ -205,6 +205,7 @@ void motor_start(void)
   foc_algorithm_initialize();
   compressor_reset_control(COMPRESSOR_MIN_SPEED_HZ);
   compressor_target_speed_hz = compressor_limit_speed(compressor_target_speed_hz);
+  trace_reset();
 
   TIM_CtrlPWMOutputs(PWM_TIM,ENABLE);
 
@@ -323,6 +324,7 @@ void SysTick_Handler(void)
     communication_handle();
     #endif
     low_control_task();
+    trace_sample_10ms();
     TimingDelay_Decrement();
     hz_100_cnt=0;
   }

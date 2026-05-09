@@ -77,6 +77,19 @@
       "problemMatcher": []
     },
     {
+      "label": "Export trace CSV",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/tools/export-trace.ps1"
+      ],
+      "problemMatcher": []
+    },
+    {
       "label": "Clean firmware",
       "type": "shell",
       "command": "powershell",

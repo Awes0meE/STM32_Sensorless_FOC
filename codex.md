@@ -57,10 +57,12 @@
 - PWM：`TIM1`，`PWM_TIM_FREQ=10000 Hz`，`FOC_PERIOD=0.0001F`。
 - 死区：`DEAD_TIME=200 ns`。
 - FOC 模式：`SENSORLESS_FOC_SELECT` 已启用，`HALL_FOC_SELECT` 已注释。
-- 压缩机安全启动：`COMPRESSOR_SAFE_START_ENABLE=1`，12V 台架低速版本。
-- 速度范围：`30-50 Hz` 电频率；对 4 对极 6MD030Z 约等价于 `450-750 rpm` 机械转速，`KEY3` 以 `5 Hz` 步进循环。
-- 启动电流：`MOTOR_STARTUP_CURRENT=3.0f`，当前回退到已验证能真实起转的慢速爬升曲线。
-- 开环强拖：`COMPRESSOR_FORCE_START_ENABLE=1`，EKF 未锁定前使用 `2-18 Hz` 开环角度斜坡，斜率 `3 Hz/s`。
+- 压缩机安全启动：`COMPRESSOR_SAFE_START_ENABLE=1`，12V 台架开环保持诊断版。
+- 速度参考范围：`120-200 Hz` 电频率；对 4 对极 6MD030Z 约等价于 `1800-3000 rpm` 机械转速，`KEY3` 以 `20 Hz` 步进循环。当前诊断版实际运行保持在 `1-45 Hz` 开环，不自动切入该速度参考。
+- 启动电流：参考 GE2117 参数，先用 `COMPRESSOR_STARTUP_ID_CURRENT=3.0f` 做 1s d 轴定位，定位结束后 `Id=3A`、`Iq=0-3A` 正向开环慢拖；`Iq` 约 `8s` 爬到 3A。
+- 开环强拖：`COMPRESSOR_FORCE_START_ENABLE=1`，`COMPRESSOR_OPEN_LOOP_HOLD_ENABLE=1`，启动阶段先 `1s` 固定电角度 d 轴定位，再用 `1-45 Hz` 开环角度斜坡，斜率 `1.5 Hz/s`，到 45Hz 后保持开环；`COMPRESSOR_OPEN_LOOP_DIRECTION=1.0f`。反向 `-1.0f` 已实测更差。
+- OLED 诊断：`ol:` 为当前开环电频率；底行 `r:` 为命令 q 轴电流 `FOC_Input.Iq_ref`，`q:` 为实际 q 轴反馈电流 `Current_Idq.Iq`；不要再把命令值当作真实相电流。
+- RAM trace：`motor/trace.c/h` 每 `20ms` 记录一次启动黑匣子，2048 条约 `41s`；按 `KEY1` 启动时 `trace_reset()`，故障/停机后自动冻结。导出用 `tools/export-trace.ps1` 或 VSCode 任务 `Export trace CSV`。
 - 速度闭环切入：`SPEED_LOOP_CLOSE_RAD_S=120.0f`。
 - 保护阈值：母线 `9.0-15.5 V`，相电流连续超过 `6.0 A` 停机，故障/停机后 `10s` 重启等待。
 - 故障码：`1` 欠压，`2` 过压，`3` 过流，`4` 堵转，`5` 重启等待。
@@ -83,11 +85,12 @@
 - 未做完整 Keil/IAR 构建，因为命令行环境未发现 `UV4/armcc/iarbuild`。
 - 已新增根目录 `README.md` 作为 GitHub/新人入口；长期细节仍以本文件为准。
 - 已将 `user/` 和 `motor/` 中原 GBK/CP1252 编码的源码注释维护为 UTF-8，并新增 `.editorconfig` 声明后续源码按 UTF-8 编辑。
-- 已新增“压缩机安全启动版本”：当前为 12V 低速诊断档，默认 30 Hz 电频率、最高 50 Hz 电频率，启动 Iq 慢速爬升到 3.0A，12V 母线窗口、相电流软件保护、20s 启动检查、2s 堵转确认、10s 重启等待。
-- 2026-05-09 实机验证：加入 `2-18 Hz` 开环强拖启动后，12V 下压缩机可稳定 `C:run`，EKF 从 0 爬升到 `12-13`，Iq 稳定约 `1.49A`，台架电源约 `220mA`，OCTW/FAULT 不亮，吸气口有可感知吸力。
+- 已新增“压缩机安全启动版本”：当前切到开环保持诊断档，默认运行目标 120 Hz 电频率，但实际启动/运行先保持 `1-45 Hz` 开环，先 `Id=3A/Iq=0A` 定位，再 `Id=3A/Iq=0-3A` 拖动，12V 母线窗口、相电流软件保护、40s 启动检查、3s 堵转确认、10s 重启等待。
+- 2026-05-09 中间验证：加入 `2-18 Hz` 开环强拖启动后，12V 下压缩机曾可低速 `C:run`，但重复启动成功率低；后续用 RAM trace 证明电流环能跟随，真正问题在 EKF/速度闭环接管。
+- 2026-05-09 关键基线：45Hz 开环保持、`Id=3A/Iq=3A`、12V 台架电源约 1A 时压缩机稳定运行且吸力强；trace 显示 `Vbus≈11.62V`、`Vq≈2.40V`、`Iq` 误差约 0.01A。此时 EKF 长期约 `-21Hz`，与 `ol=45Hz` 方向/幅值不一致，因此 EKF 校准前禁止自动闭环接管。
 - 已将 6MD030Z 初始 FOC 参数写入 `motor/foc_define_parameter.h`：`Rs=0.376Ω`、`Ls=0.20mH`、`flux=0.00650Wb`，这些值是启动初值，不是最终标定。
 - 已把 DRV8301 硬件过流阈值从 `OC_ADJ_SET_18` 降为 `OC_ADJ_SET_8`，更适合 12V 小压缩机安全试机。
-- 已打通 VSCode + STM32CubeCLT + ST-Link 链路：`.vscode/tasks.json`、`.vscode/launch.json`、`.vscode/c_cpp_properties.json`、`tools/vscode-build.ps1`。
+- 已打通 VSCode + STM32CubeCLT + ST-Link 链路：`.vscode/tasks.json`、`.vscode/launch.json`、`.vscode/c_cpp_properties.json`、`tools/vscode-build.ps1`、`tools/export-trace.ps1`。
 - VSCode 构建默认使用 `D:\ST\STM32CubeCLT_1.21.0`，也可通过环境变量 `STM32CUBECLT_PATH` 覆盖构建脚本路径；调试配置路径在 `.vscode/launch.json` 中维护。
 - GCC 构建产物位于 `build/stm32_drv8301.elf/.hex/.bin`，`build/` 已由 `.gitignore` 忽略。
 - 为了让 PC 通信关闭时能 GCC 链接，`user/stm32f4xx_it.*` 中的 USB OTG handler 已按 `PC_COMMUNICATION_ENABLE` 包裹；GCC 专用 newlib stub 位于 `tools/gcc_syscalls.c`。
@@ -97,14 +100,14 @@
 - 上电后固件先初始化硬件、OLED、DRV8301、FOC，并进行电流零偏采样。
 - 零偏完成后，按 `KEY1 / PC4` 切换电机启停。
 - `KEY2 / PC5` 切换 OLED 显示页。
-- `KEY3 / PB2` 将目标速度在 `30/35/40/45/50 Hz` 电频率间循环。
-- `motor_start()` 当前默认从 `30 Hz` 电频率目标启动，不再使用原工程的 `20.0F`。OLED 的 `tgt:1800` 是旧显示口径，不代表真实机械 1800 rpm。
+- `KEY3 / PB2` 将速度参考在 `120/140/160/180/200 Hz` 电频率间循环；当前开环保持诊断版不会自动切入该闭环速度参考。
+- `motor_start()` 当前会先 `1s` 定位，然后 `1-45 Hz` 开环慢拖并保持。OLED 第二页 `ol:` 是实际开环电频率，`r:`/`q:` 是命令/反馈 q 轴电流。
 
 ## 已知风险和后续任务
 
 - USB 上位机通信虽然默认关闭，但工程仍保留通信库和 USB 源文件；需要重新使用上位机时，再把 `PC_COMMUNICATION_ENABLE` 置 1 并复核 USB 48 MHz 时钟。
-- 当前 6MD030Z 参数是根据手册估算的启动初值；实机首轮必须记录空载/轻载电流、启动时间、EKF 机械 rpm 是否稳定、母线跌落。
-- 12V 下无感低速启动仍可能因为反电动势太小而失败；如果 450-750 rpm 诊断档运行不稳，下一步优先做开环对齐/强拖再切 EKF。
+- 当前 6MD030Z 参数是根据手册估算的启动初值；45Hz 开环保持已能稳定运行，但不是最终产品参数。
+- 当前 EKF 在稳定 45Hz 开环时长期约 `-21Hz`，方向/尺度都不可信；EKF 校准前禁止自动闭环接管。下一步优先校准 EKF 输入符号、参数尺度和速度估计，再设计平滑接管。
 - 保护阈值现在适合 12V 小压缩机试机；若要跑 24V 或更大功率，先明确 shunt、母线电压、MOSFET、散热和电源限流能力，并重新整定阈值。
 - 仓库中包含 Debug/Release/Keil 输出文件，后续整理时可考虑加 `.gitignore`，但不要在没有确认前大规模删除历史文件。
 

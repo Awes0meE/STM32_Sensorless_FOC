@@ -21,6 +21,7 @@ extern float theta;
 extern float angle;
 extern float Iq_ref;
 extern float EKF_Hz;
+extern float compressor_open_loop_speed_hz;
 extern u8 speed_close_loop_flag;
 extern uint16_t ADC1ConvertedValue[5];
 

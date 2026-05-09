@@ -32,7 +32,8 @@ extern float flux;
 
 static uint16_t compressor_vbus_fault_cnt = 0;
 static uint16_t compressor_current_fault_cnt = 0;
-static float compressor_open_loop_speed_hz = COMPRESSOR_OPEN_LOOP_START_HZ;
+float compressor_open_loop_speed_hz = COMPRESSOR_OPEN_LOOP_START_HZ;
+static uint32_t compressor_open_loop_ticks = 0;
 
 static float adc_absf(float value)
 {
@@ -57,13 +58,30 @@ static float compressor_limit_iq(float value)
   return value;
 }
 
+static uint8_t compressor_is_aligning(void)
+{
+  return (compressor_open_loop_ticks < (COMPRESSOR_OPEN_LOOP_ALIGN_MS * 10u)) ? 1u : 0u;
+}
+
 static void compressor_update_open_loop_start(void)
 {
   if((motor_start_stop != 1) || (compressor_state == COMPRESSOR_STATE_FAULT))
   {
     compressor_open_loop_speed_hz = COMPRESSOR_OPEN_LOOP_START_HZ;
+    compressor_open_loop_ticks = 0;
+    hall_angle = 0.0f;
+    hall_angle_add = 0.0f;
+    return;
   }
-  else if(compressor_open_loop_speed_hz < COMPRESSOR_OPEN_LOOP_MAX_HZ)
+
+  compressor_open_loop_ticks++;
+  if(compressor_is_aligning() != 0u)
+  {
+    hall_angle_add = 0.0f;
+    return;
+  }
+
+  if(compressor_open_loop_speed_hz < COMPRESSOR_OPEN_LOOP_MAX_HZ)
   {
     compressor_open_loop_speed_hz += COMPRESSOR_OPEN_LOOP_RAMP_HZ_S * FOC_PERIOD;
     if(compressor_open_loop_speed_hz > COMPRESSOR_OPEN_LOOP_MAX_HZ)
@@ -72,7 +90,7 @@ static void compressor_update_open_loop_start(void)
     }
   }
 
-  hall_angle_add = 2.0f * PI * compressor_open_loop_speed_hz * FOC_PERIOD;
+  hall_angle_add = COMPRESSOR_OPEN_LOOP_DIRECTION * 2.0f * PI * compressor_open_loop_speed_hz * FOC_PERIOD;
 }
 
 static void compressor_adc_safety_check(void)
@@ -161,11 +179,20 @@ void motor_run(void)
     return;
   }
 
-  if(speed_close_loop_flag==0)         //速度环闭环切换控制，电机刚启动时速度环不闭环
+  if(compressor_is_aligning() != 0u)
+  {
+    Iq_ref = 0.0f;
+    speed_close_loop_flag = 0;
+  }
+  else if(speed_close_loop_flag==0)    //速度环闭环切换控制，电机刚启动时速度环不闭环
   {                                    //并且电流参考值缓慢增加（防冲击），速度达到一定值
     if((Iq_ref<MOTOR_STARTUP_CURRENT)) //速度切入闭环
     {                                  //电流环在电机运行过程中全程闭环
-      Iq_ref += 0.00003f;              //角度在电机刚启动时就闭环运行，无需强拖，得益于卡尔曼滤波做
+      Iq_ref += COMPRESSOR_STARTUP_IQ_STEP_A; // Strong-start diagnostic ramp.
+      if(Iq_ref > MOTOR_STARTUP_CURRENT)
+      {
+        Iq_ref = MOTOR_STARTUP_CURRENT;
+      }
     }                                  //状态观测器低速性能比教好
     else
     {
@@ -176,12 +203,13 @@ void motor_run(void)
   {
     if(speed_close_loop_flag==1)
     {
-      if(Iq_ref>(MOTOR_STARTUP_CURRENT/2.0f))
+      if(Iq_ref>COMPRESSOR_STARTUP_HOLD_CURRENT)
       {
         Iq_ref -= 0.001f;
       }
       else
       {
+        Iq_ref = COMPRESSOR_STARTUP_HOLD_CURRENT;
         speed_close_loop_flag=2;
       }
     }
@@ -213,13 +241,24 @@ void motor_run(void)
 #ifdef  SENSORLESS_FOC_SELECT            //通过条件编译选择无感FOC运行
 
 #if COMPRESSOR_FORCE_START_ENABLE
-  if(FOC_Output.EKF[2] <= SPEED_LOOP_CLOSE_RAD_S)
+  if((compressor_state == COMPRESSOR_STATE_STARTING) ||
+     ((COMPRESSOR_OPEN_LOOP_HOLD_ENABLE != 0) && (compressor_state == COMPRESSOR_STATE_RUNNING)))
   {
-    FOC_Input.Id_ref = 0.0f;
-    FOC_Input.Iq_ref = compressor_limit_iq(Iq_ref);
-    Speed_Pid.I_Sum = Iq_ref;
+    if(compressor_is_aligning() != 0u)
+    {
+      FOC_Input.Id_ref = COMPRESSOR_STARTUP_ID_CURRENT;
+      FOC_Input.Iq_ref = 0.0f;
+      Speed_Pid.I_Sum = 0.0f;
+      FOC_Input.speed_fdk = 0.0f;
+    }
+    else
+    {
+      FOC_Input.Id_ref = COMPRESSOR_STARTUP_RUN_ID_CURRENT;
+      FOC_Input.Iq_ref = compressor_limit_iq(Iq_ref);
+      Speed_Pid.I_Sum = Iq_ref;
+      FOC_Input.speed_fdk = 2.0f * PI * compressor_open_loop_speed_hz;
+    }
     FOC_Input.theta = hall_angle;
-    FOC_Input.speed_fdk = 2.0f * PI * compressor_open_loop_speed_hz;
   }
   else
 #endif
@@ -245,7 +284,6 @@ void motor_run(void)
 
 
   EKF_Hz = FOC_Output.EKF[2]/(2.0f*PI);
-  FOC_Input.Id_ref = 0.0f;
   FOC_Input.Tpwm = PWM_TIM_PULSE_TPWM;         //FOC运行函数需要用到的输入信息
   FOC_Input.Udc = Vbus;
   FOC_Input.Rs = Rs;

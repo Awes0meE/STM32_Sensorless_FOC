@@ -111,6 +111,8 @@ typedef struct
 }CURRENT_PID_DEF;
 
 extern CURRENT_ALPHA_BETA_DEF Current_Ialpha_beta;
+extern CURRENT_DQ_DEF Current_Idq;
+extern VOLTAGE_DQ_DEF Voltage_DQ;
 
 struct tag_RTM {
   const char_T *errorStatus;

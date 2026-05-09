@@ -46,6 +46,7 @@
 #include "low_task.h"
 #include "oled_display.h"
 #include "speed_pid.h"
+#include "trace.h"
 #include "pc_communication_init.h"
 /* Exported types ------------------------------------------------------------*/
 /* Exported constants --------------------------------------------------------*/

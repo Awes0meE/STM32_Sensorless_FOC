@@ -116,6 +116,7 @@ function Build-Firmware {
     "motor/R_flux_identification_wrapper.c",
     "motor/speed_pid.c",
     "motor/stm32_ekf_wrapper.c",
+    "motor/trace.c",
     "user/board_config.c",
     "user/exti.c",
     "user/main.c",
