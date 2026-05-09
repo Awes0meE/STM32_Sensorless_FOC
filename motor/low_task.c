@@ -363,10 +363,14 @@ static void compressor_control_10ms(void)
 #if COMPRESSOR_PRODUCT_OPEN_LOOP_ENABLE
   if(compressor_state == COMPRESSOR_STATE_STARTING)
   {
+#if COMPRESSOR_AUTO_TEST_HOLD_BOOST_ENABLE
     compressor_open_loop_target_hz = COMPRESSOR_OPEN_LOOP_STARTUP_BOOST_HZ;
+#else
+    compressor_open_loop_target_hz = compressor_ec11_target_hz;
+#endif
     compressor_target_speed_hz = compressor_open_loop_target_hz;
     compressor_update_speed_reference();
-    if((compressor_open_loop_speed_hz >= (COMPRESSOR_OPEN_LOOP_STARTUP_BOOST_HZ - 0.5f)) ||
+    if((compressor_open_loop_speed_hz >= (compressor_open_loop_target_hz - 0.5f)) ||
        (compressor_state_ms >= COMPRESSOR_STARTUP_CHECK_MS))
     {
       compressor_state = COMPRESSOR_STATE_RUNNING;
@@ -460,8 +464,13 @@ void motor_start(void)
   compressor_reset_control(COMPRESSOR_MIN_SPEED_HZ);
   compressor_open_loop_reset();
 #if COMPRESSOR_PRODUCT_OPEN_LOOP_ENABLE
+#if COMPRESSOR_AUTO_TEST_HOLD_BOOST_ENABLE
   compressor_open_loop_target_hz = COMPRESSOR_OPEN_LOOP_STARTUP_BOOST_HZ;
   compressor_target_speed_hz = COMPRESSOR_OPEN_LOOP_STARTUP_BOOST_HZ;
+#else
+  compressor_open_loop_target_hz = compressor_ec11_target_hz;
+  compressor_target_speed_hz = compressor_ec11_target_hz;
+#endif
 #else
   compressor_target_speed_hz = compressor_limit_speed(compressor_target_speed_hz);
 #endif

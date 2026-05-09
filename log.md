@@ -4111,3 +4111,36 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/vscode-build.ps1 flash
 Download verified successfully
 MCU Reset
 ```
+
+## 69. 启动目标改为直接跟随 EC11 设定
+
+用户观察到：无论旋钮设定多少，第一次按 `KEY1` 启动都会先跑到 `1200rpm / 80Hz`，然后再回到旋钮设定值。
+
+原因：
+
+- `motor_start()` 里仍把启动目标写成 `COMPRESSOR_OPEN_LOOP_STARTUP_BOOST_HZ`。
+- `COMPRESSOR_STATE_STARTING` 阶段每 10ms 也会继续把目标强制写回 startup boost。
+- 虽然 boost 已限制到 80Hz，但用户希望真正按旋钮设定直接启动。
+
+修改：
+
+```text
+COMPRESSOR_AUTO_TEST_HOLD_BOOST_ENABLE == 0 时：
+  motor_start() 直接使用 compressor_ec11_target_hz
+  STARTING 状态也持续使用 compressor_ec11_target_hz
+  STARTING -> RUNNING 的到达判断改为当前 open-loop target
+
+只有显式打开 COMPRESSOR_AUTO_TEST_HOLD_BOOST_ENABLE 时，才会恢复 startup boost 行为。
+```
+
+验证：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/vscode-build.ps1 build
+FLASH used: 31488 B
+RAM used: 120736 B / 128 KB = 92.11%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/vscode-build.ps1 flash
+Download verified successfully
+MCU Reset
+```
