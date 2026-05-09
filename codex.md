@@ -7,7 +7,7 @@
 - 最新安全决策：用户观察到压缩机在高频开环测试后外壳约 `45-50°C`，且 `OL≈80Hz` 的吸力已经满足当前产品需求；停止继续向 `120Hz+` 开环硬推。
 - 当前烧录版本已关闭上电自启动：`COMPRESSOR_AUTO_TEST_ENABLE=0`，复位后不会自动启动压缩机，必须按 `KEY1` 才运行。
 - EC11 旋钮范围已锁定为 `450-1200rpm`，对应 8 极 6MD030Z 的 `30-80Hz` 电角频率；默认值为 `1200rpm / 80Hz`，每格 `10rpm / 0.667Hz`。用户确认旋钮方向反了，当前已设 `COMPRESSOR_EC11_DIRECTION=-1`。
-- `COMPRESSOR_OPEN_LOOP_STARTUP_BOOST_RPM` 改为 `COMPRESSOR_EC11_DEFAULT_RPM`，即启动 boost 最高只到 `80Hz`，不再使用 `2000rpm / 133Hz`。
+- 普通手动启动不再使用 startup boost：`motor_start()` 和 `STARTING` 状态都直接跟随当前 EC11 设定值。只有显式打开 `COMPRESSOR_AUTO_TEST_HOLD_BOOST_ENABLE` 时，才会使用 `COMPRESSOR_OPEN_LOOP_STARTUP_BOOST_RPM`。
 - 高频 V/f 实验分支已关闭：`COMPRESSOR_OPEN_LOOP_VF_ENABLE=0`。当前版本回到电流环开环 FOC 保持，不使用 110Hz 以上的电压模式。
 - 软件连续相电流保护恢复到 `COMPRESSOR_PHASE_CURRENT_LIMIT_A=6.0A`，快速相电流保护仍为 `10.0A`；`MOTOR_STARTUP_CURRENT` 和运行 `Iq` 保持 `2.5A`，`Id` 定位/运行保持 `3.0A`。
 - 本版本定位为“低速产品演示/旋钮可调安全版”，不是 EKF 闭环接管版；EKF 仍只用于 OLED/trace 观察。
