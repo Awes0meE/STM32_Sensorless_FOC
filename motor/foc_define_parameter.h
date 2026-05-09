@@ -62,10 +62,12 @@
 
 // EKF handoff diagnostics only. The current firmware still drives with open-loop angle.
 #define EKF_HANDOFF_DIAG_ENABLE          1
+#define EKF_HANDOFF_BLEND_ENABLE         1
 #define EKF_HANDOFF_MIN_HZ               25.0f
 #define EKF_HANDOFF_SPEED_RATIO_MIN      0.90f
 #define EKF_HANDOFF_SPEED_RATIO_MAX      1.10f
 #define EKF_HANDOFF_ANGLE_ERR_MAX_RAD    0.70f
 #define EKF_HANDOFF_READY_TICKS          10000u
+#define EKF_HANDOFF_BLEND_TICKS          20000u
 
 #endif

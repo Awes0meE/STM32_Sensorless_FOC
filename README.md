@@ -102,7 +102,7 @@ VSCode 建议安装：
 
 当前诊断版已加 `motor_control_ready` 启动门闩，避免 ADC 中断在 EKF 初始化完成前抢跑；OLED 的 `ekf:` 使用有符号 Hz 显示。新 trace 还会记录 `target_hz/foc_theta/ekf_angle/Valpha/Vbeta/Ialpha/Ibeta/ekf_angle_err/ekf_speed_ratio/diag_flags`，用于排查 EKF 符号、初始化分支和开环到 EKF 接管条件。
 
-当前分支 `feature/ekf-handoff-diagnostics` 是接管前诊断版：实际驱动角度仍然来自开环 `hall_angle`，不会硬切 EKF。OLED 第二页 `ph:` 显示 `EKF angle - open-loop angle` 的电角度误差，单位为度。trace 的 `diag_flags` 新增 bit4/bit5/bit6，分别表示速度比例达标、角度误差达标、连续 1s 达到接管候选条件。
+当前分支 `feature/ekf-handoff-diagnostics` 已进入角度渐变接管验证版：接管候选条件连续满足后，用约 `2s` 把 FOC 角度从开环 `hall_angle` 混合到 EKF 角度；异常时回退开环。OLED 第二页 `ph:` 显示 `EKF angle - open-loop angle` 的电角度误差，单位为度。trace 的 `diag_flags` 新增 bit4/bit5/bit6 表示速度比例达标、角度误差达标、连续 1s 达到接管候选条件；bit7 表示正在角度混合，bit8 表示已使用 EKF 角度，bit9 表示进入回退状态。
 
 当前进一步禁止 EKF 在 1s 定位阶段更新：定位阶段只跑电流环和开环定位，定位结束瞬间重置 EKF，再让 EKF 从开环旋转开始观察。这样可避免静止定位阶段的电压/电流瞬态把 EKF 预先带到错误速度分支。
 

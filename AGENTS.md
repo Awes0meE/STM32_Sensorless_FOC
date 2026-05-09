@@ -37,4 +37,4 @@ Open-loop trace results:
 
 Current development branch: `feature/ekf-handoff-diagnostics`.
 
-This branch is the first open-loop to EKF handoff diagnostic. It still drives with open-loop `hall_angle`; it only records `ekf_angle_error_rad`, `ekf_speed_ratio`, and handoff candidate flags. The next code step after data review is angle blending with fallback, not a hard EKF cutover.
+This branch now contains the first angle-blended handoff firmware. It waits for handoff-ready diagnostics, blends the FOC angle from open-loop `hall_angle` to EKF angle over about 2 seconds, and falls back to open-loop if speed ratio or EKF/open-loop phase error leaves the valid window. It still keeps the current command strategy conservative at `Id/Iq≈3A`; speed-loop product control is a later stage.

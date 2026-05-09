@@ -23,9 +23,11 @@ extern float Iq_ref;
 extern float EKF_Hz;
 extern float ekf_angle_error_rad;
 extern float ekf_speed_ratio;
+extern float ekf_handoff_blend;
 extern uint8_t ekf_handoff_ready;
 extern uint8_t ekf_handoff_speed_ok;
 extern uint8_t ekf_handoff_angle_ok;
+extern uint8_t ekf_handoff_state;
 extern float compressor_open_loop_speed_hz;
 extern float compressor_open_loop_target_hz;
 extern uint8_t compressor_aligning_flag;
@@ -33,5 +35,10 @@ extern u8 speed_close_loop_flag;
 extern uint16_t ADC1ConvertedValue[5];
 
 void compressor_open_loop_reset(void);
+
+#define EKF_HANDOFF_STATE_OPEN_LOOP 0u
+#define EKF_HANDOFF_STATE_BLEND     1u
+#define EKF_HANDOFF_STATE_EKF       2u
+#define EKF_HANDOFF_STATE_FALLBACK  3u
 
 #endif

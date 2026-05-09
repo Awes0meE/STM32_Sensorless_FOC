@@ -2629,3 +2629,63 @@ bit6 handoff ready
 - 相位误差随频率升高反而变小，60Hz 平均仅约 `5°` 电角度。
 - 电流环保持健康，`Iq/Id≈3A`，无持续异常电流。
 - 下一步可以实现“角度渐变混合接管版”：从开环角度缓慢 blend 到 EKF 角度，加入 fallback，不要硬切。
+
+## 52. 实现角度渐变混合接管版
+
+在 `feature/ekf-handoff-diagnostics` 分支继续实现第一版真正接管逻辑，但仍保持电流策略保守，不启用产品级速度闭环。
+
+设计原则：
+
+- 不硬切 EKF 角度。
+- 只有三频点已验证的接管候选条件满足后才开始。
+- FOC 角度从开环 `hall_angle` 按最短电角度差混合到 EKF angle。
+- 混合时间约 `2s`。
+- 若速度比例或 EKF/开环相位误差失效，回退到开环。
+
+代码修改：
+
+```text
+motor/foc_define_parameter.h
+- 新增 EKF_HANDOFF_BLEND_ENABLE=1
+- 新增 EKF_HANDOFF_BLEND_TICKS=20000
+
+motor/adc.c/h
+- 新增 ekf_handoff_blend
+- 新增 ekf_handoff_state:
+  - OPEN_LOOP
+  - BLEND
+  - EKF
+  - FALLBACK
+- ekf_angle_error_rad 改为始终表示 EKF angle - open-loop hall_angle
+- 满足 ready 后 blend 从 0 增到 1
+- FOC_Input.theta = hall_angle + shortest_angle_error(EKF - hall) * blend
+- FOC_Input.speed_fdk 同步在开环速度和 EKF 速度之间插值
+
+motor/trace.c
+- diag_flags 新增：
+  - bit7：正在 blend
+  - bit8：已经 full EKF angle
+  - bit9：fallback
+```
+
+验证：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 build
+结果：成功
+FLASH: 30136B / 512KB
+RAM: 112504B / 128KB, 85.83%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 flash
+结果：成功，已通过 ST-LINK 烧录并复位
+```
+
+下一步现场测试建议：
+
+```text
+1. 先测 45Hz
+2. 跑稳后观察声音、电源电流、吸力是否和接管前一致
+3. OLED ph 不应突然大跳
+4. KEY1 停机后导出
+5. trace 中应看到 diag_flags 从 125 进入 bit7，再进入 bit8；不能出现 bit9 fallback
+```

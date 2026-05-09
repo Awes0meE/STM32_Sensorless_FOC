@@ -71,6 +71,18 @@ static int16_t trace_diag_flags(void)
   {
     flags |= 0x0040;
   }
+  if(ekf_handoff_state == EKF_HANDOFF_STATE_BLEND)
+  {
+    flags |= 0x0080;
+  }
+  if(ekf_handoff_state == EKF_HANDOFF_STATE_EKF)
+  {
+    flags |= 0x0100;
+  }
+  if(ekf_handoff_state == EKF_HANDOFF_STATE_FALLBACK)
+  {
+    flags |= 0x0200;
+  }
   return flags;
 }
 

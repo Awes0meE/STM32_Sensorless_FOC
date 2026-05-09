@@ -24,9 +24,11 @@ float Iq_ref;
 float EKF_Hz;
 float ekf_angle_error_rad;
 float ekf_speed_ratio;
+float ekf_handoff_blend;
 uint8_t ekf_handoff_ready;
 uint8_t ekf_handoff_speed_ok;
 uint8_t ekf_handoff_angle_ok;
+uint8_t ekf_handoff_state = EKF_HANDOFF_STATE_OPEN_LOOP;
 float compressor_open_loop_target_hz = COMPRESSOR_OPEN_LOOP_DEFAULT_HZ;
 uint8_t compressor_aligning_flag = 0u;
 
@@ -62,6 +64,24 @@ static float adc_wrap_pm_pi(float value)
   return value;
 }
 
+static float adc_wrap_0_2pi(float value)
+{
+  while(value >= (2.0f * PI))
+  {
+    value -= 2.0f * PI;
+  }
+  while(value < 0.0f)
+  {
+    value += 2.0f * PI;
+  }
+  return value;
+}
+
+static float adc_blend_angle(float base,float target,float blend)
+{
+  return adc_wrap_0_2pi(base + adc_wrap_pm_pi(target - base) * blend);
+}
+
 static void adc_update_vbus_from_jdr(void)
 {
   Vbus = (float)ADC1->JDR1 * VBUS_CONVERSION_FACTOR;
@@ -93,9 +113,11 @@ void compressor_open_loop_reset(void)
   compressor_prev_aligning = 0u;
   ekf_angle_error_rad = 0.0f;
   ekf_speed_ratio = 0.0f;
+  ekf_handoff_blend = 0.0f;
   ekf_handoff_ready = 0u;
   ekf_handoff_speed_ok = 0u;
   ekf_handoff_angle_ok = 0u;
+  ekf_handoff_state = EKF_HANDOFF_STATE_OPEN_LOOP;
   ekf_handoff_ready_ticks = 0u;
   hall_angle = 0.0f;
   hall_angle_add = 0.0f;
@@ -115,14 +137,16 @@ static void ekf_handoff_diag_update(void)
   {
     ekf_angle_error_rad = 0.0f;
     ekf_speed_ratio = 0.0f;
+    ekf_handoff_blend = 0.0f;
     ekf_handoff_ready = 0u;
     ekf_handoff_speed_ok = 0u;
     ekf_handoff_angle_ok = 0u;
+    ekf_handoff_state = EKF_HANDOFF_STATE_OPEN_LOOP;
     ekf_handoff_ready_ticks = 0u;
     return;
   }
 
-  ekf_angle_error_rad = adc_wrap_pm_pi(FOC_Output.EKF[3] - FOC_Input.theta);
+  ekf_angle_error_rad = adc_wrap_pm_pi(FOC_Output.EKF[3] - hall_angle);
   if(adc_absf(compressor_open_loop_speed_hz) > 0.1f)
   {
     ekf_speed_ratio = EKF_Hz / compressor_open_loop_speed_hz;
@@ -151,6 +175,61 @@ static void ekf_handoff_diag_update(void)
     ekf_handoff_ready_ticks = 0u;
   }
   ekf_handoff_ready = (ekf_handoff_ready_ticks >= EKF_HANDOFF_READY_TICKS) ? 1u : 0u;
+
+#if EKF_HANDOFF_BLEND_ENABLE
+  if(((ekf_handoff_state == EKF_HANDOFF_STATE_BLEND) ||
+      (ekf_handoff_state == EKF_HANDOFF_STATE_EKF)) &&
+     ((ekf_handoff_speed_ok == 0u) || (ekf_handoff_angle_ok == 0u)))
+  {
+    ekf_handoff_blend = 0.0f;
+    ekf_handoff_state = EKF_HANDOFF_STATE_FALLBACK;
+    ekf_handoff_ready_ticks = 0u;
+    ekf_handoff_ready = 0u;
+    return;
+  }
+
+  if(((ekf_handoff_state == EKF_HANDOFF_STATE_OPEN_LOOP) ||
+      (ekf_handoff_state == EKF_HANDOFF_STATE_FALLBACK)) &&
+     (ekf_handoff_ready != 0u))
+  {
+    ekf_handoff_state = EKF_HANDOFF_STATE_BLEND;
+  }
+
+  if(ekf_handoff_state == EKF_HANDOFF_STATE_BLEND)
+  {
+    ekf_handoff_blend += 1.0f / (float)EKF_HANDOFF_BLEND_TICKS;
+    if(ekf_handoff_blend >= 1.0f)
+    {
+      ekf_handoff_blend = 1.0f;
+      ekf_handoff_state = EKF_HANDOFF_STATE_EKF;
+    }
+  }
+  else if(ekf_handoff_state == EKF_HANDOFF_STATE_EKF)
+  {
+    ekf_handoff_blend = 1.0f;
+  }
+  else
+  {
+    ekf_handoff_blend = 0.0f;
+  }
+#else
+  ekf_handoff_blend = 0.0f;
+  ekf_handoff_state = EKF_HANDOFF_STATE_OPEN_LOOP;
+#endif
+}
+
+static void ekf_handoff_apply_angle(void)
+{
+  if(ekf_handoff_blend <= 0.0f)
+  {
+    FOC_Input.theta = hall_angle;
+    return;
+  }
+
+  FOC_Input.theta = adc_blend_angle(hall_angle,FOC_Output.EKF[3],ekf_handoff_blend);
+  FOC_Input.speed_fdk =
+    (1.0f - ekf_handoff_blend) * (2.0f * PI * compressor_open_loop_speed_hz) +
+    ekf_handoff_blend * FOC_Output.EKF[2];
 }
 
 static void compressor_update_open_loop_start(void)
@@ -386,6 +465,8 @@ void motor_run(void)
 
 
   EKF_Hz = FOC_Output.EKF[2]/(2.0f*PI);
+  ekf_handoff_diag_update();
+  ekf_handoff_apply_angle();
   FOC_Input.Tpwm = PWM_TIM_PULSE_TPWM;         //FOC运行函数需要用到的输入信息
   FOC_Input.Udc = Vbus;
   FOC_Input.Rs = Rs;
@@ -397,7 +478,6 @@ void motor_run(void)
   FOC_Input.ic = Ic;
   foc_algorithm_step();       //整个FOC运行函数（包括无感状态观测器，电流环，SVPWM，坐标变换，电机参数识别）
   EKF_Hz = FOC_Output.EKF[2]/(2.0f*PI);
-  ekf_handoff_diag_update();
 
   if(motor_start_stop==1)
   {
