@@ -59,6 +59,18 @@ static int16_t trace_diag_flags(void)
   {
     flags |= 0x0008;
   }
+  if(ekf_handoff_speed_ok != 0u)
+  {
+    flags |= 0x0010;
+  }
+  if(ekf_handoff_angle_ok != 0u)
+  {
+    flags |= 0x0020;
+  }
+  if(ekf_handoff_ready != 0u)
+  {
+    flags |= 0x0040;
+  }
   return flags;
 }
 
@@ -113,6 +125,8 @@ void trace_sample_10ms(void)
   trace_buffer[index].vbeta_x100 = trace_float_to_i16(FOC_Interface_states.EKF_Interface[1],100.0f);
   trace_buffer[index].ialpha_x100 = trace_float_to_i16(FOC_Interface_states.EKF_Interface[2],100.0f);
   trace_buffer[index].ibeta_x100 = trace_float_to_i16(FOC_Interface_states.EKF_Interface[3],100.0f);
+  trace_buffer[index].ekf_angle_err_x1000 = trace_float_to_i16(ekf_angle_error_rad,1000.0f);
+  trace_buffer[index].ekf_speed_ratio_x1000 = trace_float_to_i16(ekf_speed_ratio,1000.0f);
   trace_buffer[index].diag_flags = trace_diag_flags();
   trace_buffer[index].state = (uint8_t)compressor_state;
   trace_buffer[index].fault = compressor_fault_code;

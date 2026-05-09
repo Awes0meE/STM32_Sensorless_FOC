@@ -22,6 +22,11 @@ u8 oled_display_sample_freq = 0;
 u8 speed_close_loop_flag;
 float Iq_ref;
 float EKF_Hz;
+float ekf_angle_error_rad;
+float ekf_speed_ratio;
+uint8_t ekf_handoff_ready;
+uint8_t ekf_handoff_speed_ok;
+uint8_t ekf_handoff_angle_ok;
 float compressor_open_loop_target_hz = COMPRESSOR_OPEN_LOOP_DEFAULT_HZ;
 uint8_t compressor_aligning_flag = 0u;
 
@@ -37,10 +42,24 @@ static uint16_t compressor_current_fault_cnt = 0;
 float compressor_open_loop_speed_hz = COMPRESSOR_OPEN_LOOP_START_HZ;
 static uint32_t compressor_open_loop_ticks = 0;
 static uint8_t compressor_prev_aligning = 0u;
+static uint16_t ekf_handoff_ready_ticks = 0u;
 
 static float adc_absf(float value)
 {
   return (value >= 0.0f) ? value : -value;
+}
+
+static float adc_wrap_pm_pi(float value)
+{
+  while(value > PI)
+  {
+    value -= 2.0f * PI;
+  }
+  while(value < -PI)
+  {
+    value += 2.0f * PI;
+  }
+  return value;
 }
 
 static void adc_update_vbus_from_jdr(void)
@@ -72,8 +91,66 @@ void compressor_open_loop_reset(void)
   compressor_open_loop_ticks = 0;
   compressor_aligning_flag = 0u;
   compressor_prev_aligning = 0u;
+  ekf_angle_error_rad = 0.0f;
+  ekf_speed_ratio = 0.0f;
+  ekf_handoff_ready = 0u;
+  ekf_handoff_speed_ok = 0u;
+  ekf_handoff_angle_ok = 0u;
+  ekf_handoff_ready_ticks = 0u;
   hall_angle = 0.0f;
   hall_angle_add = 0.0f;
+}
+
+static void ekf_handoff_diag_update(void)
+{
+  uint8_t running_open_loop;
+
+  running_open_loop = ((motor_start_stop == 1) &&
+                       (foc_ekf_update_enable != 0u) &&
+                       ((compressor_state == COMPRESSOR_STATE_STARTING) ||
+                        ((COMPRESSOR_OPEN_LOOP_HOLD_ENABLE != 0) &&
+                         (compressor_state == COMPRESSOR_STATE_RUNNING)))) ? 1u : 0u;
+
+  if(running_open_loop == 0u)
+  {
+    ekf_angle_error_rad = 0.0f;
+    ekf_speed_ratio = 0.0f;
+    ekf_handoff_ready = 0u;
+    ekf_handoff_speed_ok = 0u;
+    ekf_handoff_angle_ok = 0u;
+    ekf_handoff_ready_ticks = 0u;
+    return;
+  }
+
+  ekf_angle_error_rad = adc_wrap_pm_pi(FOC_Output.EKF[3] - FOC_Input.theta);
+  if(adc_absf(compressor_open_loop_speed_hz) > 0.1f)
+  {
+    ekf_speed_ratio = EKF_Hz / compressor_open_loop_speed_hz;
+  }
+  else
+  {
+    ekf_speed_ratio = 0.0f;
+  }
+
+  ekf_handoff_speed_ok =
+    ((compressor_open_loop_speed_hz >= EKF_HANDOFF_MIN_HZ) &&
+     (ekf_speed_ratio >= EKF_HANDOFF_SPEED_RATIO_MIN) &&
+     (ekf_speed_ratio <= EKF_HANDOFF_SPEED_RATIO_MAX)) ? 1u : 0u;
+  ekf_handoff_angle_ok =
+    (adc_absf(ekf_angle_error_rad) <= EKF_HANDOFF_ANGLE_ERR_MAX_RAD) ? 1u : 0u;
+
+  if((ekf_handoff_speed_ok != 0u) && (ekf_handoff_angle_ok != 0u))
+  {
+    if(ekf_handoff_ready_ticks < EKF_HANDOFF_READY_TICKS)
+    {
+      ekf_handoff_ready_ticks++;
+    }
+  }
+  else
+  {
+    ekf_handoff_ready_ticks = 0u;
+  }
+  ekf_handoff_ready = (ekf_handoff_ready_ticks >= EKF_HANDOFF_READY_TICKS) ? 1u : 0u;
 }
 
 static void compressor_update_open_loop_start(void)
@@ -319,6 +396,8 @@ void motor_run(void)
   FOC_Input.ib = Ib;
   FOC_Input.ic = Ic;
   foc_algorithm_step();       //整个FOC运行函数（包括无感状态观测器，电流环，SVPWM，坐标变换，电机参数识别）
+  EKF_Hz = FOC_Output.EKF[2]/(2.0f*PI);
+  ekf_handoff_diag_update();
 
   if(motor_start_stop==1)
   {

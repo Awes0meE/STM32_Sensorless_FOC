@@ -35,4 +35,6 @@ Open-loop trace results:
 - 45Hz: EKF `+43.06Hz`, ratio `0.957`
 - 60Hz: EKF `+56.93Hz`, ratio `0.949`
 
-Next stage: cautiously design open-loop to EKF handoff by first measuring EKF/open-loop angle difference, then adding angle blending and fallback.
+Current development branch: `feature/ekf-handoff-diagnostics`.
+
+This branch is the first open-loop to EKF handoff diagnostic. It still drives with open-loop `hall_angle`; it only records `ekf_angle_error_rad`, `ekf_speed_ratio`, and handoff candidate flags. The next code step after data review is angle blending with fallback, not a hard EKF cutover.

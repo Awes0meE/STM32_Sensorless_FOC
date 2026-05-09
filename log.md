@@ -2507,3 +2507,61 @@ build/trace_diag_60hz_confirmed_params_ekf_fix_beta_normal.csv
 - EKF/ol 随频率从 `0.974` 到 `0.949` 略微下降，仍有约 `3-5%` 的模型误差。可能来自单一 `Ls` 无法表示 `Ld/Lq`、电压模型/死区压降、母线电压采样误差或磁链微调。
 - 电流环状态健康：三频点 `Iq/Id≈3A` 均稳定，Vq 随频率上升，符合预期。
 - 下一阶段可以开始做“谨慎闭环接管”：先在 45Hz 稳定开环时观察 EKF 角度与开环角度差，再加入角度渐变混合，不要直接硬切到 EKF。
+
+## 50. 创建 EKF 接管前诊断分支
+
+从 `main` 创建新分支：
+
+```text
+feature/ekf-handoff-diagnostics
+```
+
+目标：进入开环到 EKF 闭环接管前的角度诊断阶段，但不让固件真正闭环接管，避免硬切角度导致抖动、失步或过流。
+
+代码修改：
+
+```text
+motor/foc_define_parameter.h
+- 新增 EKF_HANDOFF_* 诊断阈值：
+  - 最低开环频率 25Hz
+  - 速度比例允许 0.90 到 1.10
+  - 角度误差阈值 0.70rad
+  - 连续 10000 个 10kHz FOC tick 后判定 ready
+
+motor/adc.c/h
+- 新增 ekf_angle_error_rad
+- 新增 ekf_speed_ratio
+- 新增 ekf_handoff_speed_ok / ekf_handoff_angle_ok / ekf_handoff_ready
+- 每次 FOC step 后计算 EKF angle 与当前开环 FOC_Input.theta 的差值
+- 实际 FOC 驱动仍然使用开环 hall_angle，不切 EKF
+
+motor/trace.c/h
+- trace record 从 48 字节扩展到 52 字节
+- 新增 ekf_angle_err_rad 与 ekf_speed_ratio 两列
+- diag_flags 新增：
+  - bit4：速度比例达标
+  - bit5：角度误差达标
+  - bit6：连续满足接管候选条件
+
+tools/export-trace.ps1
+- 支持 52 字节 trace record
+- CSV 新增 ekf_angle_err_rad、ekf_speed_ratio
+
+user/oled_display.c
+- 第二页 `F:` 改为 `ph:`
+- `ph:` 显示 `EKF angle - open-loop angle` 的电角度误差，单位为度
+```
+
+验证：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 build
+结果：成功
+FLASH: 29648B / 512KB
+RAM: 112496B / 128KB, 85.83%
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 flash
+结果：成功，已通过 ST-LINK 烧录并复位
+```
+
+下一步现场测试：按 30Hz、45Hz、60Hz 各跑一次，稳定停机后导出。重点看 `ekf_angle_err_rad` 是否稳定、`ekf_speed_ratio` 是否保持约 `0.95-0.98`，以及 `diag_flags` 是否出现 bit4/bit5/bit6。

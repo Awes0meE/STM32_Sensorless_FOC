@@ -73,6 +73,14 @@ static void OLED_ShowSignedHz(u8 x,u8 y,float value)
   OLED_ShowNum(x+1*8,y,integer_part,3,16);
 }
 
+static void OLED_ShowSignedDeg(u8 x,u8 y,float value_rad)
+{
+  float value_deg;
+
+  value_deg = value_rad * 57.29578f;
+  OLED_ShowSignedHz(x,y,value_deg);
+}
+
 void oled_display_handle(void)
 {
   if(drv8301_fault_flag == 0)
@@ -89,7 +97,7 @@ void oled_display_handle(void)
       {
         OLED_Clear();
         OLED_ShowString(0,2,"ol:    cap:");
-        OLED_ShowString(0,4,"ekf:    F:");
+        OLED_ShowString(0,4,"ekf:    ph:");
         OLED_ShowString(0,6,"r:      q:     ");
         clear_display_flag=1;
       }
@@ -115,7 +123,7 @@ void oled_display_handle(void)
       OLED_ShowNum(11*8,2,(u32)compressor_open_loop_target_hz,3,16);
       
       OLED_ShowSignedHz(4*8,4,EKF_Hz);
-      OLED_ShowNum(12*8,4,(u32)compressor_fault_code,1,16);
+      OLED_ShowSignedDeg(12*8,4,ekf_angle_error_rad);
       
       OLED_ShowSignedCurrent(2*8,6,FOC_Input.Iq_ref);
       OLED_ShowSignedCurrent(10*8,6,Current_Idq.Iq);

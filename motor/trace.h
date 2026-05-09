@@ -30,6 +30,8 @@ typedef struct
   int16_t vbeta_x100;
   int16_t ialpha_x100;
   int16_t ibeta_x100;
+  int16_t ekf_angle_err_x1000;
+  int16_t ekf_speed_ratio_x1000;
   int16_t diag_flags;
   uint8_t state;
   uint8_t fault;

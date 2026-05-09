@@ -62,7 +62,7 @@
 - 启动电流：参考 GE2117 参数，先用 `COMPRESSOR_STARTUP_ID_CURRENT=3.0f` 做 1s d 轴定位，定位结束后 `Id=3A`、`Iq=0-3A` 正向开环慢拖；`Iq` 约 `8s` 爬到 3A。
 - 开环强拖：`COMPRESSOR_FORCE_START_ENABLE=1`，`COMPRESSOR_OPEN_LOOP_HOLD_ENABLE=1`，启动阶段先 `1s` 固定电角度 d 轴定位，再用 `1-30/45/60 Hz` 开环角度斜坡，斜率 `1.5 Hz/s`，到 `cap:` 选择值后保持开环；`COMPRESSOR_OPEN_LOOP_DIRECTION=1.0f`。反向 `-1.0f` 已实测更差。
 - OLED 诊断：`ol:` 为当前开环电频率，`cap:` 为本次开环保持目标频点；底行 `r:` 为命令 q 轴电流 `FOC_Input.Iq_ref`，`q:` 为实际 q 轴反馈电流 `Current_Idq.Iq`；不要再把命令值当作真实相电流。
-- RAM trace：`motor/trace.c/h` 每 `40ms` 记录一次启动黑匣子，2048 条约 `82s`；按 `KEY1` 启动时 `trace_reset()`，故障/停机后自动冻结。导出用 `tools/export-trace.ps1` 或 VSCode 任务 `Export trace CSV`。
+- RAM trace：`motor/trace.c/h` 每 `40ms` 记录一次启动黑匣子，2048 条约 `82s`；按 `KEY1` 启动时 `trace_reset()`，故障/停机后自动冻结。导出用 `tools/export-trace.ps1` 或 VSCode 任务 `Export trace CSV`。当前 trace record 为 52 字节，包含 `ekf_angle_err_rad` 和 `ekf_speed_ratio`。
 - 速度闭环切入：`SPEED_LOOP_CLOSE_RAD_S=120.0f`。
 - 保护阈值：母线 `9.0-15.5 V`，相电流连续超过 `6.0 A` 停机，故障/停机后 `10s` 重启等待。
 - 故障码：`1` 欠压，`2` 过压，`3` 过流，`4` 堵转，`5` 重启等待。
@@ -104,6 +104,8 @@
 - 2026-05-09 已根据用户重新确认的扫描版手册参数改成“确认版参数 + EKF 增益修复”版本：`Rs=0.188Ω`、`Ls=0.36mH`、`flux=0.00580Wb`；并修复 `stm32_ekf_wrapper.c` 中 Kalman 增益矩阵计算覆盖原值的问题。原代码在计算 `K = P H^T S^-1` 时先覆盖 `K_x_0`，随后计算 `K_x_1` 又使用了覆盖后的 `K_x_0`，会使 EKF 更新矩阵偏斜。
 - 确认版参数 + EKF 增益修复 + beta 取反复测 45Hz：稳定段 `EKF=-43.11Hz`、`EKF/ol=-0.958`、`Iq/Id≈3.00A`、`Vbus≈11.59V`、`Vq≈2.38V`。幅值已经基本对上，方向为负，说明半速问题基本解决，且 beta 轴取反不再适用。当前已烧录 beta 正常符号版：`EKF_V_BETA_SIGN=+1`、`EKF_I_BETA_SIGN=+1`，下一轮优先复测 45Hz，预期 EKF 接近 `+43Hz` 到 `+45Hz`。
 - beta 正常符号 + 确认版参数 + EKF 增益修复三频点结果：30Hz 稳定段 `EKF=+29.21Hz`、`EKF/ol=0.974`；45Hz 稳定段 `EKF=+43.06Hz`、`EKF/ol=0.957`；60Hz 稳定段 `EKF=+56.93Hz`、`EKF/ol=0.949`。`Iq/Id≈3A` 均稳定跟随，无 fault。结论：EKF 方向与速度尺度已基本修复，可进入“谨慎闭环接管”阶段，但应先加接管条件、角度误差监控和可回退逻辑。
+- 已从 `main` 切出 `feature/ekf-handoff-diagnostics` 分支并烧录接管前诊断版。此版实际 FOC 驱动角度仍为开环 `hall_angle`，不进行闭环接管；新增 `ekf_angle_error_rad = EKF angle - FOC_Input.theta`、`ekf_speed_ratio = EKF_Hz / open_loop_hz`、`ekf_handoff_speed_ok`、`ekf_handoff_angle_ok`、`ekf_handoff_ready`。接管候选条件为开环不低于 25Hz、速度比例 `0.90-1.10`、角度误差绝对值不超过 `0.70rad`，连续 10000 个 10kHz FOC tick 约 1s 后置 ready。
+- 接管诊断版 OLED 第二页把原 `F:` 位置改成 `ph:`，显示 EKF 与开环角度差的电角度度数；故障状态仍由顶部 `C:fault` 和保护状态机判断。trace `diag_flags` 新增 bit4 速度 OK、bit5 角度 OK、bit6 handoff ready。
 - VSCode 构建默认使用 `D:\ST\STM32CubeCLT_1.21.0`，也可通过环境变量 `STM32CUBECLT_PATH` 覆盖构建脚本路径；调试配置路径在 `.vscode/launch.json` 中维护。
 - GCC 构建产物位于 `build/stm32_drv8301.elf/.hex/.bin`，`build/` 已由 `.gitignore` 忽略。
 - 为了让 PC 通信关闭时能 GCC 链接，`user/stm32f4xx_it.*` 中的 USB OTG handler 已按 `PC_COMMUNICATION_ENABLE` 包裹；GCC 专用 newlib stub 位于 `tools/gcc_syscalls.c`。
