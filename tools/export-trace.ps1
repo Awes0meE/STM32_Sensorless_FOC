@@ -122,7 +122,7 @@ $samplePeriodMs = Read-U32 $meta 28
 if ($magic -ne 0x54434f46) {
   throw ("Trace magic mismatch: 0x{0:x8}" -f $magic)
 }
-if ($recordSize -ne 32) {
+if (($recordSize -ne 32) -and ($recordSize -ne 48)) {
   throw "Unexpected trace record size: $recordSize"
 }
 
@@ -141,7 +141,11 @@ if ($wrapped -ne 0) {
 }
 
 $lines = New-Object System.Collections.Generic.List[string]
-$lines.Add("time_ms,ol_hz,ekf_hz,iq_ref_a,iq_fb_a,id_fb_a,ia_a,ib_a,ic_a,vbus_v,vd_v,vq_v,angle_rad,state,fault,motor,speed_flag")
+if ($recordSize -ge 48) {
+  $lines.Add("time_ms,ol_hz,ekf_hz,iq_ref_a,iq_fb_a,id_fb_a,ia_a,ib_a,ic_a,vbus_v,vd_v,vq_v,angle_rad,target_hz,foc_theta_rad,ekf_angle_rad,valpha_v,vbeta_v,ialpha_a,ibeta_a,diag_flags,state,fault,motor,speed_flag")
+} else {
+  $lines.Add("time_ms,ol_hz,ekf_hz,iq_ref_a,iq_fb_a,id_fb_a,ia_a,ib_a,ic_a,vbus_v,vd_v,vq_v,angle_rad,state,fault,motor,speed_flag")
+}
 
 for ($n = 0; $n -lt $recordsToWrite; $n++) {
   $recordIndex = ($startIndex + $n) % $bufferSize
@@ -159,13 +163,31 @@ for ($n = 0; $n -lt $recordsToWrite; $n++) {
   $vd = (Read-I16 $bytes ($base + 22)) / 100.0
   $vq = (Read-I16 $bytes ($base + 24)) / 100.0
   $angle = (Read-I16 $bytes ($base + 26)) / 1000.0
-  $state = Read-U8 $bytes ($base + 28)
-  $fault = Read-U8 $bytes ($base + 29)
-  $motor = Read-U8 $bytes ($base + 30)
-  $speedFlag = Read-U8 $bytes ($base + 31)
+  if ($recordSize -ge 48) {
+    $targetHz = (Read-I16 $bytes ($base + 28)) / 10.0
+    $focTheta = (Read-I16 $bytes ($base + 30)) / 1000.0
+    $ekfAngle = (Read-I16 $bytes ($base + 32)) / 1000.0
+    $valpha = (Read-I16 $bytes ($base + 34)) / 100.0
+    $vbeta = (Read-I16 $bytes ($base + 36)) / 100.0
+    $ialpha = (Read-I16 $bytes ($base + 38)) / 100.0
+    $ibeta = (Read-I16 $bytes ($base + 40)) / 100.0
+    $diagFlags = Read-I16 $bytes ($base + 42)
+    $state = Read-U8 $bytes ($base + 44)
+    $fault = Read-U8 $bytes ($base + 45)
+    $motor = Read-U8 $bytes ($base + 46)
+    $speedFlag = Read-U8 $bytes ($base + 47)
 
-  $lines.Add(("{0},{1:f1},{2:f1},{3:f2},{4:f2},{5:f2},{6:f2},{7:f2},{8:f2},{9:f2},{10:f2},{11:f2},{12:f3},{13},{14},{15},{16}" -f `
-    $timeMs,$ol,$ekf,$iqRef,$iqFb,$idFb,$ia,$ib,$ic,$vbus,$vd,$vq,$angle,$state,$fault,$motor,$speedFlag))
+    $lines.Add(("{0},{1:f1},{2:f1},{3:f2},{4:f2},{5:f2},{6:f2},{7:f2},{8:f2},{9:f2},{10:f2},{11:f2},{12:f3},{13:f1},{14:f3},{15:f3},{16:f2},{17:f2},{18:f2},{19:f2},{20},{21},{22},{23},{24}" -f `
+      $timeMs,$ol,$ekf,$iqRef,$iqFb,$idFb,$ia,$ib,$ic,$vbus,$vd,$vq,$angle,$targetHz,$focTheta,$ekfAngle,$valpha,$vbeta,$ialpha,$ibeta,$diagFlags,$state,$fault,$motor,$speedFlag))
+  } else {
+    $state = Read-U8 $bytes ($base + 28)
+    $fault = Read-U8 $bytes ($base + 29)
+    $motor = Read-U8 $bytes ($base + 30)
+    $speedFlag = Read-U8 $bytes ($base + 31)
+
+    $lines.Add(("{0},{1:f1},{2:f1},{3:f2},{4:f2},{5:f2},{6:f2},{7:f2},{8:f2},{9:f2},{10:f2},{11:f2},{12:f3},{13},{14},{15},{16}" -f `
+      $timeMs,$ol,$ekf,$iqRef,$iqFb,$idFb,$ia,$ib,$ic,$vbus,$vd,$vq,$angle,$state,$fault,$motor,$speedFlag))
+  }
 }
 
 $lines | Set-Content -Path $OutCsv -Encoding utf8

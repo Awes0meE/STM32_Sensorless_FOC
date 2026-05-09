@@ -24,6 +24,7 @@ FOC_INPUT_DEF FOC_Input;
 
 
 FOC_OUTPUT_DEF FOC_Output;
+uint8_T foc_ekf_update_enable = 1u;
 
 
 RT_MODEL rtM_;
@@ -293,17 +294,27 @@ void foc_algorithm_step(void)
   Current_PID_Calc(FOC_Input.Iq_ref,Current_Idq.Iq,&Voltage_DQ.Vq,&Current_Q_PID);     //Q轴电流环PID  根据电流参考与电流反馈去计算 输出电压
   Rev_Park_Transf(Voltage_DQ,Transf_Cos_Sin,&Voltage_Alpha_Beta);                //反park变换  通过电流环得到的dq轴电压信息结合角度信息，去把直流信息转化为交流信息用于SVPWM的输入
 
-  FOC_Interface_states.EKF_Interface[0] = Voltage_Alpha_Beta.Valpha;   //扩展卡尔曼估计转子位置与速度需要的输入信息
-  FOC_Interface_states.EKF_Interface[1] = Voltage_Alpha_Beta.Vbeta;    //状态观测器输入
-  FOC_Interface_states.EKF_Interface[2] = Current_Ialpha_beta.Ialpha;
-  FOC_Interface_states.EKF_Interface[3] = Current_Ialpha_beta.Ibeta;
+  FOC_Interface_states.EKF_Interface[0] = EKF_V_ALPHA_SIGN * Voltage_Alpha_Beta.Valpha;   //扩展卡尔曼估计转子位置与速度需要的输入信息
+  FOC_Interface_states.EKF_Interface[1] = EKF_V_BETA_SIGN * Voltage_Alpha_Beta.Vbeta;     //状态观测器输入
+  FOC_Interface_states.EKF_Interface[2] = EKF_I_ALPHA_SIGN * Current_Ialpha_beta.Ialpha;
+  FOC_Interface_states.EKF_Interface[3] = EKF_I_BETA_SIGN * Current_Ialpha_beta.Ibeta;
   FOC_Interface_states.EKF_Interface[4] = FOC_Input.Rs;
   FOC_Interface_states.EKF_Interface[5] = FOC_Input.Ls;
   FOC_Interface_states.EKF_Interface[6] = FOC_Input.flux;
 
 
-  stm32_ekf_Outputs_wrapper(&FOC_Interface_states.EKF_Interface[0], &FOC_Output.EKF[0],  //扩展卡尔曼估计转子位置与速度的输出函数
-                            &FOC_Interface_states.EKF_States[0]);
+  if(foc_ekf_update_enable != 0u)
+  {
+    stm32_ekf_Outputs_wrapper(&FOC_Interface_states.EKF_Interface[0], &FOC_Output.EKF[0],  //扩展卡尔曼估计转子位置与速度的输出函数
+                              &FOC_Interface_states.EKF_States[0]);
+  }
+  else
+  {
+    FOC_Output.EKF[0] = 0.0f;
+    FOC_Output.EKF[1] = 0.0f;
+    FOC_Output.EKF[2] = 0.0f;
+    FOC_Output.EKF[3] = 0.0f;
+  }
 
   FOC_Interface_states.R_flux_Ident_Interface[0] = Current_Idq.Iq;         //电机电阻与磁链参数识别算法的输入
   FOC_Interface_states.R_flux_Ident_Interface[1] = FOC_Input.speed_fdk;
@@ -325,8 +336,11 @@ void foc_algorithm_step(void)
   SVPWM_Calc(Voltage_Alpha_Beta,FOC_Input.Udc,FOC_Input.Tpwm);       //SVPWM 计算模块
 
 
-  stm32_ekf_Update_wrapper(&FOC_Interface_states.EKF_Interface[0], &FOC_Output.EKF[0],   //扩展卡尔曼滤波算法的计算
-                           &FOC_Interface_states.EKF_States[0]);                         //也就是无感状态观测器的计算
+  if(foc_ekf_update_enable != 0u)
+  {
+    stm32_ekf_Update_wrapper(&FOC_Interface_states.EKF_Interface[0], &FOC_Output.EKF[0],   //扩展卡尔曼滤波算法的计算
+                             &FOC_Interface_states.EKF_States[0]);                         //也就是无感状态观测器的计算
+  }
 
 
   L_identification_Update_wrapper(&FOC_Interface_states.L_Ident_Interface[0],//电机电感参数识别算法的计算
@@ -342,6 +356,17 @@ void foc_algorithm_step(void)
   FOC_Output.L_RF[2] = FOC_Interface_states.R_flux_Ident_Output[1];
 }
 
+
+void foc_ekf_reset(void)
+{
+  int_T i1;
+
+  stm32_ekf_Start_wrapper(&FOC_Interface_states.EKF_States[0]);
+  for (i1=0; i1 < 4; i1++) {
+    FOC_Interface_states.EKF_States[i1] = 0.0;
+    FOC_Output.EKF[i1] = 0.0f;
+  }
+}
 
 void foc_algorithm_initialize(void)
 {
@@ -363,7 +388,8 @@ void foc_algorithm_initialize(void)
   }
   speed_pid_initialize();  //速度环PID 参数 初始化
 
-  stm32_ekf_Start_wrapper(&FOC_Interface_states.EKF_States[0]);//扩展卡尔曼滤波算法 参数初始化
+  foc_ekf_update_enable = 1u;
+  foc_ekf_reset();//扩展卡尔曼滤波算法 参数初始化
 
   L_identification_Start_wrapper(&FOC_Interface_states.L_Ident_States);//电机电感参数识别算法 参数初始化
 
@@ -373,13 +399,7 @@ void foc_algorithm_initialize(void)
   {
     real_T initVector[4] = { 0, 0, 0, 0 };
 
-    {
-      int_T i1;
-      real_T *dw_DSTATE = &FOC_Interface_states.EKF_States[0];
-      for (i1=0; i1 < 4; i1++) {
-        dw_DSTATE[i1] = initVector[i1];
-      }
-    }
+    (void)initVector;
   }
 
   {

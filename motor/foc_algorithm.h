@@ -112,6 +112,7 @@ typedef struct
 
 extern CURRENT_ALPHA_BETA_DEF Current_Ialpha_beta;
 extern CURRENT_DQ_DEF Current_Idq;
+extern VOLTAGE_ALPHA_BETA_DEF Voltage_Alpha_Beta;
 extern VOLTAGE_DQ_DEF Voltage_DQ;
 
 struct tag_RTM {
@@ -126,7 +127,9 @@ extern FOC_INPUT_DEF FOC_Input;
 
 extern FOC_OUTPUT_DEF FOC_Output;
 
+extern uint8_T foc_ekf_update_enable;
 
+extern void foc_ekf_reset(void);
 extern void foc_algorithm_initialize(void);
 extern void foc_algorithm_step(void);
 

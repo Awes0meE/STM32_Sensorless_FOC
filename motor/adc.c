@@ -22,6 +22,8 @@ u8 oled_display_sample_freq = 0;
 u8 speed_close_loop_flag;
 float Iq_ref;
 float EKF_Hz;
+float compressor_open_loop_target_hz = COMPRESSOR_OPEN_LOOP_DEFAULT_HZ;
+uint8_t compressor_aligning_flag = 0u;
 
 float theta_add;
 float theta;
@@ -34,6 +36,7 @@ static uint16_t compressor_vbus_fault_cnt = 0;
 static uint16_t compressor_current_fault_cnt = 0;
 float compressor_open_loop_speed_hz = COMPRESSOR_OPEN_LOOP_START_HZ;
 static uint32_t compressor_open_loop_ticks = 0;
+static uint8_t compressor_prev_aligning = 0u;
 
 static float adc_absf(float value)
 {
@@ -63,31 +66,43 @@ static uint8_t compressor_is_aligning(void)
   return (compressor_open_loop_ticks < (COMPRESSOR_OPEN_LOOP_ALIGN_MS * 10u)) ? 1u : 0u;
 }
 
+void compressor_open_loop_reset(void)
+{
+  compressor_open_loop_speed_hz = COMPRESSOR_OPEN_LOOP_START_HZ;
+  compressor_open_loop_ticks = 0;
+  compressor_aligning_flag = 0u;
+  compressor_prev_aligning = 0u;
+  hall_angle = 0.0f;
+  hall_angle_add = 0.0f;
+}
+
 static void compressor_update_open_loop_start(void)
 {
   if((motor_start_stop != 1) || (compressor_state == COMPRESSOR_STATE_FAULT))
   {
-    compressor_open_loop_speed_hz = COMPRESSOR_OPEN_LOOP_START_HZ;
-    compressor_open_loop_ticks = 0;
-    hall_angle = 0.0f;
-    hall_angle_add = 0.0f;
+    compressor_open_loop_reset();
     return;
   }
 
   compressor_open_loop_ticks++;
+  compressor_aligning_flag = compressor_is_aligning();
   if(compressor_is_aligning() != 0u)
   {
     hall_angle_add = 0.0f;
     return;
   }
 
-  if(compressor_open_loop_speed_hz < COMPRESSOR_OPEN_LOOP_MAX_HZ)
+  if(compressor_open_loop_speed_hz < compressor_open_loop_target_hz)
   {
     compressor_open_loop_speed_hz += COMPRESSOR_OPEN_LOOP_RAMP_HZ_S * FOC_PERIOD;
-    if(compressor_open_loop_speed_hz > COMPRESSOR_OPEN_LOOP_MAX_HZ)
+    if(compressor_open_loop_speed_hz > compressor_open_loop_target_hz)
     {
-      compressor_open_loop_speed_hz = COMPRESSOR_OPEN_LOOP_MAX_HZ;
+      compressor_open_loop_speed_hz = compressor_open_loop_target_hz;
     }
+  }
+  else if(compressor_open_loop_speed_hz > compressor_open_loop_target_hz)
+  {
+    compressor_open_loop_speed_hz = compressor_open_loop_target_hz;
   }
 
   hall_angle_add = COMPRESSOR_OPEN_LOOP_DIRECTION * 2.0f * PI * compressor_open_loop_speed_hz * FOC_PERIOD;
@@ -161,6 +176,8 @@ void get_offset(uint32_t *a_offset,uint32_t *b_offset)
 void motor_run(void)
 {
   double ia_temp,ib_temp;
+  uint8_t aligning;
+
   adc_update_vbus_from_jdr();
   ia_temp = (int16_t)((int16_t)A_offset - (int16_t)ADC1->JDR2);   //得到A相电流 adc转换值
   ib_temp = (int16_t)((int16_t)B_offset - (int16_t)ADC1->JDR3);   //得到B相电流 adc转换值
@@ -179,7 +196,15 @@ void motor_run(void)
     return;
   }
 
-  if(compressor_is_aligning() != 0u)
+  aligning = compressor_is_aligning();
+  if((compressor_prev_aligning != 0u) && (aligning == 0u))
+  {
+    foc_ekf_reset();
+  }
+  compressor_prev_aligning = aligning;
+  foc_ekf_update_enable = (aligning == 0u) ? 1u : 0u;
+
+  if(aligning != 0u)
   {
     Iq_ref = 0.0f;
     speed_close_loop_flag = 0;
@@ -336,7 +361,7 @@ void ADC_IRQHandler(void)
 
   if((SAMPLE_ADC->SR & ADC_FLAG_JEOC) == ADC_FLAG_JEOC)
   {
-    if(get_offset_flag==2)
+    if((get_offset_flag==2) && (motor_control_ready != 0u))
     {
       hall_angle += hall_angle_add;
       if(hall_angle<0.0f)

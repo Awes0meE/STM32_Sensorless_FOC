@@ -22,7 +22,11 @@ extern float angle;
 extern float Iq_ref;
 extern float EKF_Hz;
 extern float compressor_open_loop_speed_hz;
+extern float compressor_open_loop_target_hz;
+extern uint8_t compressor_aligning_flag;
 extern u8 speed_close_loop_flag;
 extern uint16_t ADC1ConvertedValue[5];
+
+void compressor_open_loop_reset(void);
 
 #endif

@@ -19,6 +19,7 @@ typedef enum
 } COMPRESSOR_STATE_DEF;
 
 extern uint8_t motor_start_stop;
+extern volatile uint8_t motor_control_ready;
 extern COMPRESSOR_STATE_DEF compressor_state;
 extern uint8_t compressor_fault_code;
 extern float compressor_target_speed_hz;

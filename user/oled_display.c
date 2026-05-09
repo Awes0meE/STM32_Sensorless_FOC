@@ -49,6 +49,30 @@ static void OLED_ShowSignedCurrent(u8 x,u8 y,float value)
   OLED_ShowNum(x+3*8,y,decimal_part,2,16);
 }
 
+static void OLED_ShowSignedHz(u8 x,u8 y,float value)
+{
+  float abs_value;
+  u32 integer_part;
+
+  if(value < 0.0f)
+  {
+    OLED_ShowString(x,y,"-");
+    abs_value = -value;
+  }
+  else
+  {
+    OLED_ShowString(x,y," ");
+    abs_value = value;
+  }
+
+  integer_part = (u32)(abs_value + 0.5f);
+  if(integer_part > 999u)
+  {
+    integer_part = 999u;
+  }
+  OLED_ShowNum(x+1*8,y,integer_part,3,16);
+}
+
 void oled_display_handle(void)
 {
   if(drv8301_fault_flag == 0)
@@ -64,7 +88,7 @@ void oled_display_handle(void)
       if(clear_display_flag==0)
       {
         OLED_Clear();
-        OLED_ShowString(0,2,"ol:");
+        OLED_ShowString(0,2,"ol:    cap:");
         OLED_ShowString(0,4,"ekf:    F:");
         OLED_ShowString(0,6,"r:      q:     ");
         clear_display_flag=1;
@@ -88,8 +112,9 @@ void oled_display_handle(void)
       }
       
       OLED_ShowNum(3*8,2,(u32)compressor_open_loop_speed_hz,3,16);
+      OLED_ShowNum(11*8,2,(u32)compressor_open_loop_target_hz,3,16);
       
-      OLED_ShowNum(4*8,4,(u32)EKF_Hz,3,16);
+      OLED_ShowSignedHz(4*8,4,EKF_Hz);
       OLED_ShowNum(12*8,4,(u32)compressor_fault_code,1,16);
       
       OLED_ShowSignedCurrent(2*8,6,FOC_Input.Iq_ref);

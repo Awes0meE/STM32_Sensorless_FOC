@@ -475,14 +475,25 @@ K_3_1 = P_pred_3_1*H_1_1;
 
 
 
-K_0_0 = K_0_0*temp_0_0 + K_0_1*temp_1_0;
-K_0_1 = K_0_0*temp_0_1 + K_0_1*temp_1_1;
-K_1_0 = K_1_0*temp_0_0 + K_1_1*temp_1_0;
-K_1_1 = K_1_0*temp_0_1 + K_1_1*temp_1_1;
-K_2_0 = K_2_0*temp_0_0 + K_2_1*temp_1_0;
-K_2_1 = K_2_0*temp_0_1 + K_2_1*temp_1_1;
-K_3_0 = K_3_0*temp_0_0 + K_3_1*temp_1_0;
-K_3_1 = K_3_0*temp_0_1 + K_3_1*temp_1_1;
+{
+  float K_0_0_raw = K_0_0;
+  float K_0_1_raw = K_0_1;
+  float K_1_0_raw = K_1_0;
+  float K_1_1_raw = K_1_1;
+  float K_2_0_raw = K_2_0;
+  float K_2_1_raw = K_2_1;
+  float K_3_0_raw = K_3_0;
+  float K_3_1_raw = K_3_1;
+
+  K_0_0 = K_0_0_raw*temp_0_0 + K_0_1_raw*temp_1_0;
+  K_0_1 = K_0_0_raw*temp_0_1 + K_0_1_raw*temp_1_1;
+  K_1_0 = K_1_0_raw*temp_0_0 + K_1_1_raw*temp_1_0;
+  K_1_1 = K_1_0_raw*temp_0_1 + K_1_1_raw*temp_1_1;
+  K_2_0 = K_2_0_raw*temp_0_0 + K_2_1_raw*temp_1_0;
+  K_2_1 = K_2_0_raw*temp_0_1 + K_2_1_raw*temp_1_1;
+  K_3_0 = K_3_0_raw*temp_0_0 + K_3_1_raw*temp_1_0;
+  K_3_1 = K_3_0_raw*temp_0_1 + K_3_1_raw*temp_1_1;
+}
 
 tempa_0_0 = X_pred_0_0 + K_0_0*(Y_0_0 - Y_pred_0_0) + K_0_1*(Y_1_0 - Y_pred_1_0);
 tempa_1_0 = X_pred_1_0 + K_1_0*(Y_0_0 - Y_pred_0_0) + K_1_1*(Y_1_0 - Y_pred_1_0);
@@ -530,10 +541,18 @@ tempa_3_0 = X_pred_3_0 + K_3_0*(Y_0_0 - Y_pred_0_0) + K_3_1*(Y_1_0 - Y_pred_1_0)
     {
        tempa_3_0 -= (2.0f*PI);
     }
+    else if(tempa_3_0<0.0f)
+    {
+       tempa_3_0 += (2.0f*PI);
+    }
     #else
         if(tempa_3_0>(6.2831853f))
     {
        tempa_3_0 -= (6.2831853f);
+    }
+    else if(tempa_3_0<0.0f)
+    {
+       tempa_3_0 += (6.2831853f);
     }
 
     #endif

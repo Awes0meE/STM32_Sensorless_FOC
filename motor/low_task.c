@@ -9,6 +9,7 @@
 u16 hz_100_cnt = 0;
 uint8_t motor_start_stop = 0;
 uint8_t motor_start_stop_pre = 1;
+volatile uint8_t motor_control_ready = 0u;
 COMPRESSOR_STATE_DEF compressor_state = COMPRESSOR_STATE_IDLE;
 uint8_t compressor_fault_code = COMPRESSOR_FAULT_NONE;
 float compressor_target_speed_hz = COMPRESSOR_DEFAULT_SPEED_HZ;
@@ -62,6 +63,7 @@ static void compressor_reset_control(float speed_hz)
 
 void compressor_clear_fault(void)
 {
+  motor_control_ready = 0u;
   compressor_fault_code = COMPRESSOR_FAULT_NONE;
   if(compressor_state == COMPRESSOR_STATE_FAULT)
   {
@@ -70,6 +72,7 @@ void compressor_clear_fault(void)
   motor_start_stop = 0;
   motor_start_stop_pre = 0;
   motor_run_display_flag = 0;
+  compressor_open_loop_reset();
 }
 
 void compressor_fault_trip(uint8_t fault_code)
@@ -80,6 +83,7 @@ void compressor_fault_trip(uint8_t fault_code)
   }
 
   compressor_fault_code = fault_code;
+  motor_control_ready = 0u;
   compressor_state = COMPRESSOR_STATE_FAULT;
   compressor_state_ms = 0;
   compressor_stall_ms = 0;
@@ -87,6 +91,7 @@ void compressor_fault_trip(uint8_t fault_code)
   motor_start_stop = 0;
   motor_start_stop_pre = 0;
   compressor_reset_control(COMPRESSOR_MIN_SPEED_HZ);
+  compressor_open_loop_reset();
 
   PWM_TIM->CCR1 = PWM_TIM_PULSE>>1;
   PWM_TIM->CCR2 = PWM_TIM_PULSE>>1;
@@ -114,6 +119,22 @@ static void compressor_update_speed_reference(void)
   else
   {
     Speed_Ref = target_hz;
+  }
+}
+
+static void compressor_cycle_open_loop_target(void)
+{
+  if(compressor_open_loop_target_hz < COMPRESSOR_OPEN_LOOP_CAL_HZ_MID)
+  {
+    compressor_open_loop_target_hz = COMPRESSOR_OPEN_LOOP_CAL_HZ_MID;
+  }
+  else if(compressor_open_loop_target_hz < COMPRESSOR_OPEN_LOOP_CAL_HZ_HIGH)
+  {
+    compressor_open_loop_target_hz = COMPRESSOR_OPEN_LOOP_CAL_HZ_HIGH;
+  }
+  else
+  {
+    compressor_open_loop_target_hz = COMPRESSOR_OPEN_LOOP_CAL_HZ_LOW;
   }
 }
 
@@ -182,6 +203,7 @@ void motor_start(void)
 {
   uint8_t fault_code;
 
+  motor_control_ready = 0u;
   if(compressor_state == COMPRESSOR_STATE_FAULT)
   {
     motor_start_stop = 0;
@@ -204,21 +226,24 @@ void motor_start(void)
   GPIO_SetBits(GPIOC,GPIO_Pin_9);
   foc_algorithm_initialize();
   compressor_reset_control(COMPRESSOR_MIN_SPEED_HZ);
+  compressor_open_loop_reset();
   compressor_target_speed_hz = compressor_limit_speed(compressor_target_speed_hz);
   trace_reset();
-
-  TIM_CtrlPWMOutputs(PWM_TIM,ENABLE);
 
   compressor_state = COMPRESSOR_STATE_STARTING;
   compressor_fault_code = COMPRESSOR_FAULT_NONE;
   compressor_state_ms = 0;
   compressor_stall_ms = 0;
   motor_run_display_flag = 1;
+
+  TIM_CtrlPWMOutputs(PWM_TIM,ENABLE);
+  motor_control_ready = 1u;
 }
 void motor_stop(void)
 {
   uint8_t was_running;
 
+  motor_control_ready = 0u;
   was_running = (compressor_state == COMPRESSOR_STATE_STARTING) ||
                 (compressor_state == COMPRESSOR_STATE_RUNNING);
   GPIO_ResetBits(GPIOC,GPIO_Pin_9);
@@ -227,6 +252,7 @@ void motor_stop(void)
   PWM_TIM->CCR2 = PWM_TIM_PULSE>>1;
   PWM_TIM->CCR3 = PWM_TIM_PULSE>>1;
   compressor_reset_control(COMPRESSOR_MIN_SPEED_HZ);
+  compressor_open_loop_reset();
   compressor_state = COMPRESSOR_STATE_IDLE;
   compressor_state_ms = 0;
   compressor_stall_ms = 0;
@@ -274,14 +300,9 @@ void low_control_task(void)
   }
   if(key3_flag==1)
   {
-    compressor_target_speed_hz += COMPRESSOR_SPEED_STEP_HZ;
-    if(compressor_target_speed_hz > COMPRESSOR_MAX_SPEED_HZ)
-    {
-      compressor_target_speed_hz = COMPRESSOR_MIN_SPEED_HZ;
-    }
     if(motor_start_stop==0)
     {
-      Speed_Ref = compressor_target_speed_hz;
+      compressor_cycle_open_loop_target();
     }
     key3_flag=0;
   }

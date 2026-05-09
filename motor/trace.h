@@ -5,7 +5,7 @@
 
 #define TRACE_MAGIC            0x54434f46u
 #define TRACE_BUFFER_SIZE      2048u
-#define TRACE_SAMPLE_DIV       2u
+#define TRACE_SAMPLE_DIV       4u
 #define TRACE_SAMPLE_PERIOD_MS (10u * TRACE_SAMPLE_DIV)
 
 typedef struct
@@ -23,6 +23,14 @@ typedef struct
   int16_t vd_x100;
   int16_t vq_x100;
   int16_t angle_x1000;
+  int16_t target_hz_x10;
+  int16_t foc_theta_x1000;
+  int16_t ekf_angle_x1000;
+  int16_t valpha_x100;
+  int16_t vbeta_x100;
+  int16_t ialpha_x100;
+  int16_t ibeta_x100;
+  int16_t diag_flags;
   uint8_t state;
   uint8_t fault;
   uint8_t motor;

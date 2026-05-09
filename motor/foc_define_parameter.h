@@ -27,6 +27,10 @@
 #define COMPRESSOR_OPEN_LOOP_ALIGN_MS      1000u
 #define COMPRESSOR_OPEN_LOOP_START_HZ      1.0f
 #define COMPRESSOR_OPEN_LOOP_MAX_HZ        45.0f
+#define COMPRESSOR_OPEN_LOOP_CAL_HZ_LOW    30.0f
+#define COMPRESSOR_OPEN_LOOP_CAL_HZ_MID    45.0f
+#define COMPRESSOR_OPEN_LOOP_CAL_HZ_HIGH   60.0f
+#define COMPRESSOR_OPEN_LOOP_DEFAULT_HZ    COMPRESSOR_OPEN_LOOP_CAL_HZ_LOW
 #define COMPRESSOR_OPEN_LOOP_RAMP_HZ_S     1.5f
 #define COMPRESSOR_OPEN_LOOP_DIRECTION     1.0f
 #define COMPRESSOR_VBUS_MIN_V              9.0f
@@ -45,9 +49,15 @@
 //#define HALL_FOC_SELECT
 #define SENSORLESS_FOC_SELECT
 
-// Motor parameter seed values for Panasonic 6MD030Z. Recalibrate on real hardware.
-#define RS_PARAMETER     0.376f
-#define LS_PARAMETER     0.00020f
-#define FLUX_PARAMETER   0.00650f
+// Panasonic 6MD030Z EKF seed values. Rs is per phase; datasheet line-line R is 0.376 ohm.
+#define RS_PARAMETER     0.188f
+#define LS_PARAMETER     0.00036f
+#define FLUX_PARAMETER   0.00580f
+
+// EKF input signs. These only affect the observer, not FOC actuation.
+#define EKF_V_ALPHA_SIGN  1.0f
+#define EKF_V_BETA_SIGN   1.0f
+#define EKF_I_ALPHA_SIGN  1.0f
+#define EKF_I_BETA_SIGN   1.0f
 
 #endif

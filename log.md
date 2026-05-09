@@ -1490,3 +1490,1020 @@ Iq 平均误差：约 0.010A
 5. IA/IB 为什么要用电压档测，而不是电流档。
 6. 从 1.646V 的电流采样偏置和 0.567V 的 Vbus 分压，判断板子静态健康。
 7. 后续再展开 EKF、无感启动、相序判断、参数整定和产品级保护。
+
+## 31. 45Hz 开环稳定运行第二次导出
+
+在确认压缩机已经手动停机、未复位的情况下，第二次从 RAM trace 导出 CSV：
+
+```text
+Trace CSV: build/trace_repeat2_45hz.csv
+samples = 2048
+period_ms = 20
+wrapped = 1
+total_sample_count = 2182
+active = 0
+```
+
+稳定区间筛选条件为 `ol >= 44.5Hz` 且 `motor = 1`，共 681 条记录，约覆盖 13.6s：
+
+```text
+ol 平均：44.99Hz，范围 44.50Hz 到 45.00Hz
+EKF 平均：36.82Hz，范围 35.10Hz 到 37.60Hz
+Iq_ref 平均：3.00A
+Iq_fb 平均：3.00A，范围 2.96A 到 3.03A
+Id_fb 平均：3.00A，范围 2.95A 到 3.04A
+Vbus 平均：11.60V，范围 11.39V 到 11.70V
+Vd 平均：0.03V，范围 -0.17V 到 0.31V
+Vq 平均：2.38V，范围 2.24V 到 2.56V
+Iq 平均误差：约 0.010A，最大约 0.040A
+```
+
+时间点摘录：
+
+```text
+10.00s: ol=14.5Hz, ekf=16.7Hz, Iq=3.01A, Id=2.99A, Vbus=11.73V, STARTING
+20.00s: ol=29.6Hz, ekf=26.0Hz, Iq=3.00A, Id=3.01A, Vbus=11.70V, STARTING
+30.00s: ol=44.5Hz, ekf=35.7Hz, Iq=2.99A, Id=2.99A, Vbus=11.55V, STARTING
+40.00s: ol=45.0Hz, ekf=37.1Hz, Iq=3.00A, Id=2.96A, Vbus=11.55V, RUNNING
+```
+
+判断修正：
+
+- 第二次和上一条 repeat 结果一致：45Hz 开环运行时 EKF 为正，平均约 `36.8Hz`，不再是第一次 `trace_openloop_stable.csv` 里的 `-21Hz`。
+- 电流环仍然非常稳，`Id/Iq` 都贴着 3A，母线没有塌陷，说明当前 45Hz 开环基线本身可靠。
+- EKF 的方向现在看起来可能是对的，但幅值仍比开环 45Hz 低约 18%，并且不同导出之间出现过 `-21Hz` 与 `+36.8Hz` 的明显差异。
+- 下一步不能直接闭环接管；应先继续做 EKF 复现实验和尺度校准，确认这是初始化/符号问题，还是 `Rs/Ls/flux/采样周期/极对数` 参数导致的比例偏差。
+
+## 32. 45Hz 开环稳定运行第三次导出，断电重启后复现
+
+这次按计划做了完整断电重启复现实验：
+
+```text
+按 KEY1 停机
+关闭 12V 台架电源，等待后重新上电
+OLED 正常显示后按 KEY1 启动
+运行到 ol=45Hz 并稳定吸气
+按 KEY1 停机
+未复位、未断电，导出 trace
+```
+
+我的现场反馈：
+
+```text
+稳定吸气
+稳定电源电流约 1A
+EKF 大概稳定在 36Hz
+没有 OCTW/FAULT
+没有异常抖动/声音
+```
+
+导出结果：
+
+```text
+Trace CSV: build/trace_repeat3_powercycle_45hz.csv
+samples = 2048
+period_ms = 20
+wrapped = 1
+total_sample_count = 2831
+active = 0
+```
+
+稳定区间筛选条件为 `ol >= 44.5Hz` 且 `motor = 1`，共 1330 条记录：
+
+```text
+ol 平均：45.00Hz，范围 44.50Hz 到 45.00Hz
+EKF 平均：36.83Hz，范围 35.20Hz 到 37.60Hz
+Iq_ref 平均：3.00A
+Iq_fb 平均：3.00A，范围 2.96A 到 3.04A
+Id_fb 平均：3.00A，范围 2.96A 到 3.04A
+Vbus 平均：11.53V，范围 10.85V 到 11.70V
+Vq 平均：2.38V，范围 2.23V 到 2.53V
+Iq 平均误差：约 0.010A，最大约 0.040A
+```
+
+与前两次 repeat 对比：
+
+```text
+repeat1: EKF 平均 36.70Hz，Vbus 平均 11.60V，Vq 平均 2.39V
+repeat2: EKF 平均 36.82Hz，Vbus 平均 11.60V，Vq 平均 2.38V
+repeat3: EKF 平均 36.83Hz，Vbus 平均 11.53V，Vq 平均 2.38V
+```
+
+判断修正：
+
+- 完整断电重启后仍然复现 `EKF≈36.8Hz`，所以当前稳定工况下 EKF 的方向基本可以先视为正向。
+- 三次 repeat 对齐后，当前主要问题从“EKF 方向乱跳”收敛为“EKF 速度幅值约为开环频率的 0.818 倍”。
+- 45Hz 开环基线已经可以作为后续 EKF 标定的稳定试验台。
+- 下一步应做多频点开环标定，例如 30Hz、45Hz、60Hz，对比 `EKF/ol` 比例是否固定。如果比例固定，优先查极对数/采样周期/速度单位换算；如果比例随频率变化，优先查 `Rs/Ls/flux` 和 EKF 模型参数。
+
+## 33. 多频点 EKF 标定版
+
+为了继续验证 EKF 速度估计偏差的性质，固件改成了多频点开环标定版。
+
+代码修改：
+
+```text
+motor/foc_define_parameter.h
+- 新增 COMPRESSOR_OPEN_LOOP_CAL_HZ_LOW = 30Hz
+- 新增 COMPRESSOR_OPEN_LOOP_CAL_HZ_MID = 45Hz
+- 新增 COMPRESSOR_OPEN_LOOP_CAL_HZ_HIGH = 60Hz
+- 新增 COMPRESSOR_OPEN_LOOP_DEFAULT_HZ = 30Hz
+
+motor/adc.c / motor/adc.h
+- 新增 compressor_open_loop_target_hz
+- 开环速度不再固定爬到 COMPRESSOR_OPEN_LOOP_MAX_HZ，而是爬到当前 target/cap。
+
+motor/low_task.c
+- KEY3 仅在停机时循环切换 cap：30 -> 45 -> 60 -> 30。
+- 运行中按 KEY3 不改变 cap，避免对正在运行的压缩机做突变扰动。
+
+user/oled_display.c
+- OLED 第二页增加 cap 显示：
+  ol:xxx cap:xxx
+```
+
+构建与烧录：
+
+```text
+Build firmware 成功
+FLASH: 27564 B / 512 KB
+RAM: 71512 B / 128 KB
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+```
+
+下一轮实验顺序：
+
+```text
+1. 上电后默认 cap=030，直接按 KEY1 启动，跑 30Hz。
+2. 跑稳后按 KEY1 停机，不复位、不掉电，导出 CSV。
+3. 停机状态按 KEY3，让 cap=045，再按 KEY1 启动。
+4. 跑稳后按 KEY1 停机，不复位、不掉电，导出 CSV。
+5. 停机状态按 KEY3，让 cap=060，再按 KEY1 启动。
+6. 跑稳后按 KEY1 停机，不复位、不掉电，导出 CSV。
+```
+
+每个频点需要记录：
+
+```text
+是否稳定吸气
+稳定电源电流
+OLED 上 EKF 大概稳定值
+是否有 OCTW/FAULT
+是否有异常抖动/声音
+```
+
+判断逻辑：
+
+- 如果 `EKF/ol` 在 30/45/60Hz 近似固定，优先怀疑速度单位换算、极对数、采样周期或 EKF 输出尺度。
+- 如果 `EKF/ol` 随频率明显变化，优先怀疑电机模型参数 `Rs/Ls/flux` 或 EKF 输入量尺度。
+- 任何频点出现明显异常抖动、失吸、过流或故障，都先停机，不继续更高频点。
+
+## 34. 多频点 EKF 标定：30Hz 导出
+
+30Hz 频点测试完成后，在停机、未复位、未掉电状态下导出 trace：
+
+```text
+Trace CSV: build/trace_cal_30hz.csv
+samples = 2048
+period_ms = 20
+wrapped = 1
+total_sample_count = 2175
+active = 0
+```
+
+稳定区间筛选条件为 `29.5Hz <= ol <= 30.5Hz` 且 `motor = 1`，共 1177 条记录：
+
+```text
+ol 平均：30.00Hz，范围 29.50Hz 到 30.00Hz
+EKF 平均：-16.08Hz，范围 -16.70Hz 到 -14.30Hz
+EKF/ol 平均：-0.536
+Iq_ref 平均：3.00A
+Iq_fb 平均：3.00A，范围 2.96A 到 3.04A
+Id_fb 平均：3.00A，范围 2.94A 到 3.03A
+Vbus 平均：11.68V，范围 11.55V 到 11.78V
+Vd 平均：0.18V，范围 0.01V 到 0.41V
+Vq 平均：1.80V，范围 1.66V 到 1.98V
+Iq 平均误差：约 0.008A，最大约 0.040A
+```
+
+时间点摘录：
+
+```text
+10.00s: ol=14.5Hz, ekf=-11.7Hz, Iq=3.00A, Id=3.00A, Vbus=11.73V, STARTING
+20.00s: ol=29.6Hz, ekf=-15.8Hz, Iq=3.00A, Id=3.01A, Vbus=11.68V, STARTING
+30.00s: ol=30.0Hz, ekf=-16.0Hz, Iq=3.00A, Id=3.01A, Vbus=11.63V, STARTING
+40.00s: ol=30.0Hz, ekf=-16.0Hz, Iq=2.99A, Id=3.00A, Vbus=11.70V, RUNNING
+```
+
+阶段判断：
+
+- 30Hz 下电流环仍然稳定，`Id/Iq` 都能贴住 3A，母线电压没有塌陷。
+- `Vq≈1.80V` 明显低于 45Hz 时的 `Vq≈2.38V`，符合频率更低、反电动势更低的预期。
+- 但 EKF 在 30Hz 稳定段为负，平均 `-16.08Hz`，与 45Hz repeat 中稳定的 `+36.7-36.8Hz` 不一致。
+- 这说明 EKF 问题不只是简单的固定比例偏差；很可能存在低频可观测性、初始化方向、模型参数或输入符号耦合问题。
+- 下一步继续测 45Hz 和 60Hz；如果 45Hz 再次为正、60Hz 也为正，则 30Hz 可能处在 EKF 低速不可靠区。如果 45Hz/60Hz 也出现符号翻转，则优先排查 EKF 初始化和输入符号。
+
+## 35. 多频点 EKF 标定：45Hz 导出，复现负向 EKF
+
+45Hz 频点测试完成后，在停机、未复位、未掉电状态下导出 trace。
+
+我的现场反馈：
+
+```text
+cap = 45Hz
+吸力正常
+台架电源电流约 1A
+OLED 上 EKF 一直显示 0
+没有异常声音
+```
+
+导出结果：
+
+```text
+Trace CSV: build/trace_cal_45hz.csv
+samples = 2048
+period_ms = 20
+wrapped = 1
+total_sample_count = 2692
+active = 0
+```
+
+稳定区间筛选条件为 `44.5Hz <= ol <= 45.5Hz` 且 `motor = 1`，共 1191 条记录：
+
+```text
+ol 平均：45.00Hz，范围 44.50Hz 到 45.00Hz
+EKF 平均：-21.93Hz，范围 -22.60Hz 到 -20.30Hz
+EKF/ol 平均：-0.487
+Iq_ref 平均：3.00A
+Iq_fb 平均：3.00A，范围 2.96A 到 3.03A
+Id_fb 平均：3.00A，范围 2.96A 到 3.05A
+Vbus 平均：11.55V，范围 11.31V 到 11.67V
+Vq 平均：2.38V，范围 2.21V 到 2.53V
+Iq 平均误差：约 0.010A，最大约 0.040A
+```
+
+时间点摘录：
+
+```text
+20.00s: ol=29.6Hz, ekf=-15.9Hz, Iq=3.01A, Id=3.00A, Vbus=11.63V, STARTING
+30.00s: ol=44.5Hz, ekf=-21.2Hz, Iq=2.98A, Id=2.99A, Vbus=11.51V, STARTING
+40.00s: ol=45.0Hz, ekf=-22.2Hz, Iq=2.99A, Id=2.98A, Vbus=11.48V, RUNNING
+50.00s: ol=45.0Hz, ekf=-21.7Hz, Iq=3.00A, Id=2.98A, Vbus=11.56V, RUNNING
+```
+
+阶段判断：
+
+- 45Hz 下机械表现、母线和电流环仍然正常，说明开环 FOC 做功稳定。
+- Trace 中稳定段没有接近 0 的 EKF 样本；OLED 显示 0 不是观测器真的为 0，更可能是当前 OLED 用无符号数字显示 `EKF_Hz`，遇到负值时显示失真。
+- 45Hz 曾经三次 repeat 得到 `+36.7-36.8Hz`，这次在多频点测试中又复现 `-21.9Hz`，说明 EKF 存在明显的符号/初始化分支问题。
+- 下一步仍然先测 60Hz，判断更高反电动势下 EKF 是否稳定转向正值；之后应优先修正 EKF 显示为 signed，并排查 EKF 初始化、角度初值、输入电压/电流符号。
+
+## 36. 多频点 EKF 标定：60Hz 导出与阶段结论
+
+60Hz 频点测试完成后，在停机、未复位、未掉电状态下导出 trace。
+
+我的现场反馈：
+
+```text
+cap = 60Hz
+吸力比 45Hz 更大，非常好
+台架电源电流约 1.27A
+声音正常
+没有故障
+```
+
+导出结果：
+
+```text
+Trace CSV: build/trace_cal_60hz.csv
+samples = 2048
+period_ms = 20
+wrapped = 1
+total_sample_count = 3316
+active = 0
+```
+
+稳定区间筛选条件为 `59.5Hz <= ol <= 60.5Hz` 且 `motor = 1`，共 1311 条记录：
+
+```text
+ol 平均：60.00Hz
+EKF 平均：-28.33Hz，范围 -29.10Hz 到 -26.00Hz
+EKF/ol 平均：-0.472
+Iq_fb 平均：3.00A
+Id_fb 平均：3.00A
+Vbus 平均：11.51V，范围 11.29V 到 11.63V
+Vd 平均：-0.06V，范围 -0.36V 到 0.50V
+Vq 平均：2.97V，范围 2.83V 到 3.19V
+Iq 平均误差：约 0.013A，最大约 0.040A
+```
+
+时间点摘录：
+
+```text
+30.00s: ol=44.5Hz, ekf=-22.0Hz, Iq=3.00A, Id=3.00A, Vbus=11.56V, STARTING
+40.00s: ol=59.4Hz, ekf=-27.3Hz, Iq=3.02A, Id=3.03A, Vbus=11.43V, RUNNING
+50.00s: ol=60.0Hz, ekf=-27.8Hz, Iq=2.99A, Id=2.99A, Vbus=11.50V, RUNNING
+60.00s: ol=60.0Hz, ekf=-28.1Hz, Iq=3.00A, Id=3.00A, Vbus=11.56V, RUNNING
+```
+
+三频点对比：
+
+```text
+30Hz: EKF 平均 -16.08Hz, EKF/ol = -0.536, Vq 平均 1.80V
+45Hz: EKF 平均 -21.93Hz, EKF/ol = -0.487, Vq 平均 2.38V
+60Hz: EKF 平均 -28.33Hz, EKF/ol = -0.472, Vq 平均 2.97V
+```
+
+阶段判断：
+
+- 30/45/60Hz 三个频点机械表现均正常，60Hz 甚至吸力更强，说明开环 FOC、电流采样、电流环、SVPWM 和功率级整体是能稳定做功的。
+- `Vq` 随开环频率从约 `1.80V -> 2.38V -> 2.97V` 增加，符合反电动势随转速上升的趋势。
+- EKF 在本组三频点全部为负，且绝对值随频率上升。这说明 EKF 不是完全无响应，而是在以错误方向/错误输入符号跟随某个速度相关量。
+- 因为 45Hz 之前曾三次出现 `+36.7-36.8Hz`，当前仍不能直接断定只需把 EKF 取反；更稳妥的下一步是先修 OLED signed 显示和 trace 里额外记录 EKF 角度/输入电压电流符号，然后做“只改一个符号”的诊断版本。
+- 当前禁止闭环接管的判断不变；下一步优先排查 EKF 的输入符号、角度初始化和输出符号，而不是继续提高开环频率或电流。
+
+## 37. EKF 初始化时序检查与诊断补丁
+
+新的现场观察：
+
+```text
+之前 EKF=+36Hz 的几次：
+- 按 KEY1 后，1s 转子定位结束，EKF 立刻跳到约 8Hz
+- 随后 EKF 慢慢跟着 ol 往上走
+
+多频点 30/45/60Hz 这三次：
+- OLED 上 EKF 一直显示 0
+- trace 实际显示 EKF 为负值：30Hz=-16Hz，45Hz=-22Hz，60Hz=-28Hz
+```
+
+重新检查中断与调用时序：
+
+```text
+TIM1 center-aligned PWM 运行
+TIM1 CC4 触发 ADC injected conversion
+ADC JEOC 中断触发 ADC_IRQHandler()
+ADC_IRQHandler() 里调用 motor_run()
+motor_run() 里调用 foc_algorithm_step()
+foc_algorithm_step() 里先计算电流环/SVPWM，再执行 stm32_ekf_Outputs_wrapper 和 stm32_ekf_Update_wrapper
+
+SysTick 1ms
+每 10ms 执行 low_control_task()
+low_control_task() 处理 KEY1/KEY2/KEY3、状态机和 trace_sample_10ms()
+```
+
+关键发现：
+
+- FOC/EKF 主计算不在 TIM1 update 中断里；`TIM1_UP_TIM10_IRQHandler()` 只清标志，而且 TIM1 update interrupt 当前被注释掉。
+- ADC 中断优先级为 preemption priority 1；SysTick 在 GCC 路径下没有被显式改 NVIC 优先级，实际不应高于 ADC。
+- KEY1 在 `low_control_task()` 中先把 `motor_start_stop` 从 0 改成 1，然后后面才调用 `motor_start()` 做 `foc_algorithm_initialize()`。
+- 因为 ADC 中断优先级高于 SysTick，理论上存在一个窗口：`motor_start_stop=1` 已经成立，但 EKF/FOC 还没初始化完成，ADC JEOC 抢占进来跑一次 `motor_run()`。
+- 这个窗口虽然很短，但正好能解释 EKF 有时落入不同初始分支，尤其是 EKF 这种对初始条件敏感的观测器。
+
+同步代码修改：
+
+```text
+motor/low_task.c / motor/low_task.h
+- 新增 volatile uint8_t motor_control_ready。
+- motor_start() 一开始先置 ready=0。
+- foc_algorithm_initialize()、compressor_reset_control()、compressor_open_loop_reset()、trace_reset()、状态机 STARTING 均完成后，才 enable PWM 并置 ready=1。
+- motor_stop()、compressor_fault_trip()、compressor_clear_fault() 先置 ready=0，再停 PWM/复位控制量。
+
+motor/adc.c / motor/adc.h
+- ADC_IRQHandler() 只有在 get_offset_flag==2 且 motor_control_ready!=0 时才推进 hall_angle 并调用 motor_run()。
+- 新增 compressor_open_loop_reset()，显式复位开环启动计数、ol 频率、hall_angle 和 hall_angle_add。
+- 新增 compressor_aligning_flag，供 trace 记录定位阶段。
+
+user/oled_display.c
+- EKF 显示改为 signed Hz，负值会显示为 -016/-022/-028，不再误显示成 0。
+
+motor/trace.c / motor/trace.h
+- trace record 从 32 字节扩展到 48 字节。
+- 新增记录 target_hz、FOC_Input.theta、EKF angle、Valpha/Vbeta、Ialpha/Ibeta、diag_flags。
+- diag_flags bit0=control_ready，bit1=aligning，bit2=open_loop_force_branch。
+
+tools/export-trace.ps1
+- 支持旧 32 字节和新 48 字节 trace record。
+- 新 CSV 表头增加 target_hz/foc_theta_rad/ekf_angle_rad/valpha_v/vbeta_v/ialpha_a/ibeta_a/diag_flags。
+```
+
+构建、烧录与导出格式自检：
+
+```text
+Build firmware 成功
+FLASH: 28624 B / 512 KB
+RAM: 104280 B / 128 KB，约 79.56%
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+
+空 trace 导出自检成功：
+Trace CSV: build/trace_diag_format_check.csv
+samples = 0
+record_size = 48
+```
+
+下一轮验证目标：
+
+- 从默认 `cap=030` 开始跑一次，重点看 OLED 是否显示负 EKF，而不是 0。
+- 导出 trace 后确认 `diag_flags` 在启动后为 `7` 左右：ready=1、aligning=1、open_loop=1；定位结束后应变为 `5`：ready=1、aligning=0、open_loop=1。
+- 观察 1s 定位结束时 EKF 是否还会随机跳到正分支；如果 ready 门闩后正负分支更一致，说明初始化抢跑窗口确实参与了问题。
+
+## 38. ready 门闩后 30Hz 复测
+
+烧录 EKF 初始化时序诊断补丁后，重新测试默认 `cap=030Hz`。
+
+我的现场反馈：
+
+```text
+30Hz 新版已停机，导出
+EKF 定位后立刻显示：-8
+EKF 稳定后显示：-16
+吸力：有
+电流：830mA
+声音/故障：无
+```
+
+导出结果：
+
+```text
+Trace CSV: build/trace_diag_30hz_ready.csv
+samples = 2048
+period_ms = 20
+wrapped = 1
+total_sample_count = 2430
+active = 0
+```
+
+稳定区间筛选条件为 `29.5Hz <= ol <= 30.5Hz` 且 `motor = 1`，共 1432 条记录：
+
+```text
+ol 平均：29.997Hz
+target 平均：30.000Hz
+EKF 平均：-16.158Hz，范围 -16.7Hz 到 -14.5Hz
+EKF/ol 平均：-0.539
+Iq_ref 平均：3.000A
+Iq_fb 平均：3.001A
+Id_fb 平均：3.001A
+Vbus 平均：11.641V
+Vd 平均：0.167V
+Vq 平均：1.790V
+Iq 平均误差：约 0.008A
+稳定段 diag_flags 全部为 5
+```
+
+`diag_flags=5` 的含义：
+
+```text
+bit0 = 1: motor_control_ready 已置位
+bit1 = 0: 已过 1s 定位阶段
+bit2 = 1: 正在走 open-loop force branch
+```
+
+阶段判断：
+
+- OLED signed 显示修正有效：这次不再显示 0，而是现场能看到 `-8 -> -16`。
+- ready 门闩后，30Hz 仍然稳定落在负 EKF 分支，说明负分支不只是“初始化未完成前 ADC 抢跑”造成的。
+- 因为本次运行超过 41s，环形 trace 覆盖掉了启动最早 7.6s，没有抓到 1s 定位结束瞬间；因此把 trace 采样从 20ms 改为 40ms，覆盖时间从约 41s 增加到约 82s，便于下一轮同时看到定位、爬坡和稳定段。
+
+## 39. 45Hz 完整 trace 抓到定位阶段 EKF 假速度
+
+40ms trace 版本烧录后，重新测试 `cap=045Hz` 并导出：
+
+```text
+Trace CSV: build/trace_diag_45hz_ready.csv
+samples = 1206
+period_ms = 40
+wrapped = 0
+total_sample_count = 1206
+active = 0
+```
+
+稳定区间筛选条件为 `44.5Hz <= ol <= 45.5Hz` 且 `motor = 1`，共 455 条记录：
+
+```text
+ol 平均：44.995Hz
+target 平均：45.000Hz
+EKF 平均：-21.941Hz，范围 -22.6Hz 到 -20.2Hz
+EKF/ol 平均：-0.488
+Iq_ref 平均：3.000A
+Iq_fb 平均：2.999A
+Id_fb 平均：2.999A
+Vbus 平均：11.520V
+Vq 平均：2.381V
+Iq 平均误差：约 0.009A
+稳定段 diag_flags 全部为 5
+```
+
+这次最关键的是启动前 1s 定位阶段没有被覆盖掉。摘录：
+
+```text
+t=0ms:    ol=1Hz, ekf=0.0Hz,  Iq_ref=0A, Id≈3A, flags=7, theta=0
+t=40ms:   ol=1Hz, ekf=-4.7Hz, Iq_ref=0A, Id≈3A, flags=7, theta=0
+t=80ms:   ol=1Hz, ekf=-7.8Hz, Iq_ref=0A, Id≈3A, flags=7, theta=0
+t=120ms:  ol=1Hz, ekf=-8.5Hz, Iq_ref=0A, Id≈3A, flags=7, theta=0
+t=160ms 到 960ms: EKF 基本稳定在 -8.7Hz，仍处于定位阶段
+t=1000ms: 定位结束，flags 从 7 变成 5，开环角度开始转动，EKF 仍约 -8.6Hz
+```
+
+判断：
+
+- 定位阶段 `theta=0`、`Iq_ref=0`，转子理论上被 d 轴吸附，没有开环旋转命令。
+- EKF 却在定位阶段自己跑到 `-8.7Hz`，这不是实际转速，而是观测器把静止定位阶段的电压/电流瞬态解释成了负速度。
+- 这与之前“定位后 EKF 立刻显示 -8”完全对应，也解释了为什么 EKF 会从一开始就落入负分支。
+
+同步代码修改：
+
+```text
+motor/foc_algorithm.c / h
+- 新增 foc_ekf_update_enable。
+- 新增 foc_ekf_reset()，只重置 EKF wrapper、EKF state 和 FOC_Output.EKF，不重置电流环 PI。
+- foc_algorithm_step() 在 foc_ekf_update_enable=0 时跳过 stm32_ekf_Outputs_wrapper / Update_wrapper，并把 FOC_Output.EKF 清零。
+
+motor/adc.c
+- 定位阶段 aligning=1 时设置 foc_ekf_update_enable=0。
+- 检测到 aligning 从 1 变为 0 的瞬间调用 foc_ekf_reset()。
+- 定位结束后再设置 foc_ekf_update_enable=1，让 EKF 从开环旋转刚开始的状态重新观察。
+
+motor/trace.c
+- diag_flags 新增 bit3：foc_ekf_update_enable。
+```
+
+构建与烧录：
+
+```text
+Build firmware 成功
+FLASH: 28648 B / 512 KB
+RAM: 104296 B / 128 KB，约 79.57%
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+```
+
+下一轮验证目标：
+
+- 重新跑 45Hz。
+- 预期 0-1000ms 定位阶段 OLED 的 `ekf:` 应保持 0 或接近 0，不应再跑到 `-8`。
+- 定位结束后 EKF 从 0 重新开始收敛；如果仍然走负分支，再继续查输入电压/电流符号。
+
+## 40. EKF 暂停定位版 45Hz 复测：负分支发生在开环刚开始
+
+烧录“定位阶段暂停 EKF、定位结束重置 EKF”版本后，重新测试 `cap=045Hz`。
+
+我的现场反馈：
+
+```text
+45Hz EKF 暂停定位版已停机，导出
+1 秒定位阶段 EKF 保持 0
+定位结束后 EKF 跳到 -8
+吸力、电流、声音、故障均正常
+```
+
+导出结果：
+
+```text
+Trace CSV: build/trace_diag_45hz_ekf_pause_align.csv
+samples = 1159
+period_ms = 40
+wrapped = 0
+total_sample_count = 1159
+active = 0
+```
+
+稳定区间筛选条件为 `44.5Hz <= ol <= 45.5Hz` 且 `motor = 1`，共 408 条记录：
+
+```text
+ol 平均：44.994Hz
+target 平均：45.000Hz
+EKF 平均：-22.020Hz，范围 -22.6Hz 到 -21.3Hz
+EKF/ol 平均：-0.489
+Iq_ref 平均：3.000A
+Iq_fb 平均：2.998A
+Id_fb 平均：2.999A
+Vbus 平均：11.507V
+Vq 平均：2.380V
+稳定段 diag_flags 全部为 13
+```
+
+`diag_flags=13` 的含义：
+
+```text
+bit0 = 1: motor_control_ready
+bit1 = 0: 非定位阶段
+bit2 = 1: open-loop force branch
+bit3 = 1: EKF update enable
+```
+
+启动阶段摘录：
+
+```text
+0-960ms: flags=7，定位阶段，EKF 保持 0
+1000ms: flags=13，EKF 打开后第一个样本为 -0.9Hz
+1040ms: EKF=-6.4Hz
+1080ms: EKF=-8.0Hz
+之后低速开环阶段维持在约 -8Hz，并随 ol 增大继续负向增长
+```
+
+判断：
+
+- “定位阶段污染”已经被修掉；EKF 在 0-960ms 不再自行跑到 -8Hz。
+- 负分支是在定位结束后、EKF update 打开后的 40-80ms 内形成的。
+- 这更像 EKF 的 αβ 坐标符号/相序方向与当前 FOC 开环方向不一致，而不是状态机时序问题。
+- 下一步做单变量符号诊断：只改变送入 EKF 的 `β` 轴电压/电流符号，驱动输出和电流环保持不变。若 EKF 变正且量级更接近 ol，说明 EKF 的坐标系 handedness 与当前 Clarke/SVPWM/相序相反。
+
+## 41. EKF beta 轴输入取反诊断版
+
+基于第 40 步结论，烧录单变量符号诊断版。
+
+代码修改：
+
+```text
+motor/foc_define_parameter.h
+- 新增 EKF_V_ALPHA_SIGN = +1
+- 新增 EKF_V_BETA_SIGN  = -1
+- 新增 EKF_I_ALPHA_SIGN = +1
+- 新增 EKF_I_BETA_SIGN  = -1
+
+motor/foc_algorithm.c
+- 只改变送入 EKF wrapper 的 alpha/beta 输入符号：
+  EKF Valpha = +FOC Valpha
+  EKF Vbeta  = -FOC Vbeta
+  EKF Ialpha = +FOC Ialpha
+  EKF Ibeta  = -FOC Ibeta
+- SVPWM、电流环、开环角度、压缩机实际驱动完全不变。
+
+motor/trace.c
+- trace 中 valpha/vbeta/ialpha/ibeta 改为记录实际送入 EKF 的接口值，而不是原始 FOC alpha/beta 值。
+```
+
+构建与烧录：
+
+```text
+Build firmware 成功
+FLASH: 28648 B / 512 KB
+RAM: 104296 B / 128 KB，约 79.57%
+Flash firmware 成功
+Download verified successfully
+MCU reset 成功
+```
+
+下一轮验证目标：
+
+- 重新跑 45Hz。
+- 机械表现理论上应与上一版一致，因为控制输出没有改。
+- 重点看定位结束后 EKF 是否还跳 `-8`，还是变成正值。
+- 如果 EKF 变正，说明 EKF 的 beta 轴坐标方向与当前 FOC/相序相反；后续再决定是保留输入变换，还是统一坐标定义。
+
+## 42. EKF beta 轴输入取反 45Hz 复测
+
+烧录 beta 轴输入取反诊断版后，重新测试 `cap=045Hz` 并导出：
+
+```text
+Trace CSV: build/trace_diag_45hz_beta_flip.csv
+samples = 1183
+period_ms = 40
+wrapped = 0
+total_sample_count = 1183
+active = 0
+```
+
+稳定区间筛选条件为 `44.5Hz <= ol <= 45.5Hz` 且 `motor = 1`，共 432 条记录：
+
+```text
+ol 平均：44.995Hz
+target 平均：45.000Hz
+EKF 平均：+21.900Hz，范围 +20.4Hz 到 +22.6Hz
+EKF/ol 平均：+0.487
+Iq_ref 平均：3.000A
+Iq_fb 平均：2.999A
+Id_fb 平均：3.000A
+Vbus 平均：11.549V
+Vq 平均：2.380V
+Iq 平均误差：约 0.010A
+稳定段 diag_flags 全部为 13
+```
+
+启动阶段摘录：
+
+```text
+0-960ms: flags=7，定位阶段，EKF 保持 0
+1000ms: flags=13，EKF=+1.0Hz
+1040ms: EKF=+6.6Hz
+1080ms: EKF=+8.1Hz
+随后 EKF 保持正向并随 ol 增大
+30.0s: ol=44.5Hz, EKF=+21.9Hz
+```
+
+关键判断：
+
+- 只把送入 EKF 的 `Vbeta/Ibeta` 取反，机械驱动、电流环、SVPWM 均不变，EKF 速度就从 `-22Hz` 翻成 `+21.9Hz`。
+- 这基本确认：当前 EKF wrapper 的 αβ 坐标手性与本项目实际 FOC/Clarke/相序定义相反，至少 beta 轴需要取反才能得到正向速度。
+- `Vq≈2.38V`、`Id/Iq≈3A` 与取反前几乎一致，说明这个改动确实没有改变实际驱动，只改变了观测器输入。
+- 但 `EKF/ol≈0.487`，幅值仍只有开环频率的一半左右；因此 beta 轴取反解决的是“方向”，还没有解决“尺度”。
+- Trace 中 `ekf_angle_rad` 饱和到 `-32.768`，说明 EKF 输出角度没有归一化到 `0-2π` 或 `±π`，当前 int16 trace 对角度不够友好。后续应在 trace 侧记录归一化角度，或先只用速度判断。
+
+下一步：
+
+- 先复测 30Hz 和 60Hz beta 取反，确认 `EKF/ol` 比例是否仍在 `0.47-0.54` 附近。
+- 如果三个频点都约为 `0.5`，优先查 EKF 速度单位/模型输出尺度，而不是继续改启动策略。
+- EKF 未达到接近开环频率前，仍禁止闭环接管。
+
+## 43. EKF beta 轴输入取反 30Hz 复测
+
+烧录 beta 轴输入取反诊断版后，测试 `cap=030Hz` 并导出：
+
+```text
+Trace CSV: build/trace_diag_30hz_beta_flip.csv
+samples = 928
+period_ms = 40
+wrapped = 0
+total_sample_count = 928
+active = 0
+```
+
+稳定区间筛选条件为 `29.5Hz <= ol <= 30.5Hz` 且 `motor = 1`，共 429 条记录：
+
+```text
+ol 平均：29.994Hz
+target 平均：30.000Hz
+EKF 平均：+16.209Hz，范围 +15.0Hz 到 +16.8Hz
+EKF/ol 平均：+0.540
+Iq_ref 平均：3.000A
+Iq_fb 平均：3.000A
+Id_fb 平均：3.000A
+Vbus 平均：11.642V，范围 11.480V 到 11.750V
+Vq 平均：1.790V
+Iq 平均误差：约 0.008A，最大约 0.030A
+稳定段 diag_flags 全部为 13
+```
+
+启动阶段摘录：
+
+```text
+0-960ms: flags=7，定位阶段，EKF 保持 0
+1000ms: EKF=+1.0Hz
+1040ms: EKF=+6.6Hz
+1080ms: EKF=+8.1Hz
+2000ms: ol=2.5Hz, EKF=+7.9Hz
+20000ms: ol=29.6Hz, EKF=+16.1Hz
+```
+
+与 45Hz beta 反向结果对比：
+
+```text
+30Hz: EKF 平均 +16.21Hz, EKF/ol = +0.540, Vq 平均 1.79V
+45Hz: EKF 平均 +21.90Hz, EKF/ol = +0.487, Vq 平均 2.38V
+```
+
+阶段判断：
+
+- beta 轴取反后，30Hz 和 45Hz 都得到正向 EKF，方向修正结论进一步确认。
+- `Id/Iq/Vbus/Vq` 仍然稳定，说明诊断版没有破坏实际驱动。
+- `EKF/ol` 在 30Hz 和 45Hz 下都接近 0.5，但不是完全固定；仍需测试 60Hz 判断比例是否继续保持在 `0.47-0.54`。
+- 如果 60Hz 也约为 0.5，则下一步优先查 EKF 速度尺度/单位或模型参数，而不是继续动启动策略。
+
+## 44. EKF beta 轴输入取反 60Hz 复测
+
+烧录 beta 轴输入取反诊断版后，测试 `cap=060Hz` 并导出：
+
+```text
+Trace CSV: build/trace_diag_60hz_beta_flip.csv
+samples = 1524
+period_ms = 40
+wrapped = 0
+total_sample_count = 1524
+active = 0
+```
+
+稳定区间筛选条件为 `59.5Hz <= ol <= 60.5Hz` 且 `motor = 1`，共 521 条记录：
+
+```text
+ol 平均：59.996Hz
+target 平均：60.000Hz
+EKF 平均：+28.221Hz，范围 +26.2Hz 到 +29.0Hz
+EKF/ol 平均：+0.470
+Iq_ref 平均：3.000A
+Iq_fb 平均：3.002A
+Id_fb 平均：3.001A
+Vbus 平均：11.471V，范围 11.260V 到 11.630V
+Vq 平均：2.971V
+Iq 平均误差：约 0.014A，最大约 0.040A
+稳定段 diag_flags 全部为 13
+```
+
+三频点 beta 反向对比：
+
+```text
+30Hz: EKF 平均 +16.21Hz, EKF/ol = +0.540, Vq 平均 1.79V
+45Hz: EKF 平均 +21.90Hz, EKF/ol = +0.487, Vq 平均 2.38V
+60Hz: EKF 平均 +28.22Hz, EKF/ol = +0.470, Vq 平均 2.97V
+```
+
+阶段判断：
+
+- beta 轴取反后，30/45/60Hz 全部得到正向 EKF，方向问题已基本定位。
+- EKF 速度幅值约为开环频率的一半，且随频率升高比例从 `0.54` 降到 `0.47`，不是单纯随机噪声。
+- 低阻测量要注意：三线压缩机若是星形绕组，万用表测到的 U-V 相间电阻是两相串联；电机模型里的 `Rs` 通常应填单相电阻，所以应取相间电阻的一半再扣除表笔/线阻。之前手测 U-V≈0.5Ω，则粗略单相 `Rs≈0.25Ω`，但 400Ω 档低阻精度有限。
+- 不过“EKF 速度约半”更像磁链 `flux` 偏大或 EKF 输出尺度问题。EKF 方程中反电动势项约为 `flux * omega`；如果 `flux` 填大约 2 倍，观测器会用约 1/2 的 `omega` 去解释同样的反电动势。
+- 当前 `FLUX_PARAMETER=0.00650Wb` 可能偏大；下一步做只影响 EKF 的磁链半值诊断，把 `flux` 临时改为 `0.00325Wb`，看 45Hz 下 EKF 是否接近 `ol=45Hz`。
+
+## 45. EKF 磁链半值诊断版
+
+为了验证 “EKF 约为 ol 一半” 是否由磁链参数偏大导致，烧录磁链半值诊断版。
+
+代码修改：
+
+```text
+motor/foc_define_parameter.h
+- FLUX_PARAMETER: 0.00650f -> 0.00325f
+```
+
+保留不变：
+
+```text
+EKF beta 轴输入取反仍启用
+Id/Iq 开环启动策略不变
+SVPWM、电流环、开环角度不变
+```
+
+判断逻辑：
+
+- EKF 方程中的反电动势项近似为 `flux * omega`。
+- 如果之前 `flux` 填得约大 2 倍，那么 EKF 会用约 1/2 的 `omega` 去解释同样的反电动势。
+- 把 `flux` 减半后，如果 45Hz 下 EKF 接近 45Hz，说明主要问题是磁链参数尺度；如果仍约 22Hz，则继续查速度单位/采样周期/模型输出解释。
+
+## 46. EKF 磁链半值 45Hz 复测
+
+烧录 `FLUX_PARAMETER=0.00325Wb`、beta 轴取反保持启用后，测试 `cap=045Hz` 并导出：
+
+```text
+Trace CSV: build/trace_diag_45hz_flux_half.csv
+samples = 1270
+period_ms = 40
+wrapped = 0
+total_sample_count = 1270
+active = 0
+```
+
+稳定区间筛选条件为 `44.5Hz <= ol <= 45.5Hz` 且 `motor = 1`，共 519 条记录：
+
+```text
+ol 平均：44.996Hz
+target 平均：45.000Hz
+EKF 平均：+27.286Hz，范围 +25.7Hz 到 +28.0Hz
+EKF/ol 平均：+0.606
+Iq_ref 平均：3.000A
+Iq_fb 平均：3.002A
+Id_fb 平均：3.001A
+Vbus 平均：11.565V，范围 11.430V 到 11.650V
+Vq 平均：2.365V
+Iq 平均误差：约 0.010A，最大约 0.040A
+稳定段 diag_flags 全部为 13
+```
+
+与 flux 半值前的 45Hz beta 反向版对比：
+
+```text
+flux = 0.00650Wb: EKF 平均 +21.90Hz, EKF/ol = +0.487
+flux = 0.00325Wb: EKF 平均 +27.29Hz, EKF/ol = +0.606
+```
+
+阶段判断：
+
+- 磁链减半后 EKF 确实上升，说明 `flux` 参数影响方向正确。
+- 但 EKF 只从 `21.9Hz` 提到 `27.3Hz`，没有接近 `45Hz`，所以半速问题不是单独由 `flux` 大 2 倍造成的。
+- 用户提醒“相间电阻可能应该填一半”是合理方向。三相星形绕组从 U-V 端子测得的是两相串联电阻；EKF/PMSM 模型里的 `Rs` 通常是单相电阻。若 `0.376Ω` 来自端子间/相间电阻，则模型应先试 `Rs≈0.188Ω`。用户用万用表测 `U-V≈0.5Ω`，也提示单相可能在 `0.25Ω` 附近，但低阻档误差较大。
+- 下一步应做 `Rs` 半值诊断：把 `RS_PARAMETER=0.376f` 改为 `0.188f`，并先把 `FLUX_PARAMETER` 恢复到 `0.00650f`，这样可以单独验证“Rs 是否填成了相间值”。如果 EKF 明显上升，再做 `Rs/flux` 组合标定。
+
+## 47. 用户重新确认 6MD030Z 手册参数，并修复 EKF
+
+用户说明扫描版规格书参数如下：
+
+```text
+极数：8 极，也就是 4 对极
+相间电阻：U-V = V-W = W-U = 0.376Ω
+Ke：2.96 V/kRPM
+Kt：0.049 N·m/A
+转动惯量：2.2E-05，备注为转子单体
+无通电单向 d 轴电感：0.13mH
+无通电单向 q 轴电感：0.18mH
+50Hz 通电电感：
+  1A: Lq=0.46mH, Ld=0.45mH
+  2A: Lq=0.40mH, Ld=0.37mH
+  3A: Lq=0.38mH, Ld=0.34mH
+```
+
+代码审查结论：
+
+- 当前 `stm32_ekf_wrapper.c` 并不是完整机械模型 EKF。它的输入只有 `Valpha/Vbeta/Ialpha/Ibeta/Rs/Ls/flux`，状态是 `Ialpha/Ibeta/omega/theta`。
+- 这个 wrapper 里没有使用极对数和转动惯量；`xD[2]` 是电角速度，`xD[3]` 是电角度。8 极/4 对极主要用于把电频率换算为机械 rpm，例如 45Hz 电频率约等于 `45/4*60 = 675rpm`。
+- 发现一个明确的 EKF 代码问题：Kalman 增益计算 `K = P H^T S^-1` 时，原代码先覆盖 `K_0_0/K_1_0/...`，随后计算第二列 `K_0_1/K_1_1/...` 又使用了已经覆盖后的第一列，导致 EKF 更新矩阵被算歪。
+
+代码修改：
+
+```text
+motor/foc_define_parameter.h
+- RS_PARAMETER:   0.376f -> 0.188f
+- LS_PARAMETER:   0.00020f -> 0.00036f
+- FLUX_PARAMETER: 0.00325f -> 0.00580f
+
+motor/stm32_ekf_wrapper.c
+- Kalman 增益矩阵乘法改为先保存 K 原始值，再计算两列，避免覆盖污染。
+- EKF 角度归一化补上 `<0` 时加 `2π`，后续闭环接管时角度更稳。
+```
+
+参数判断：
+
+- `Rs=0.188Ω`：因为用户确认 `0.376Ω` 是端子相间电阻，三相星形等效到模型单相电阻应约为一半。
+- `Ls=0.36mH`：当前 EKF 只有一个 `Ls`，无法分别使用 `Ld/Lq`，所以按 3A 工作区间 `Ld=0.34mH`、`Lq=0.38mH` 取平均。
+- `flux=0.00580Wb`：按 `Ke=2.96 V/kRPM` 和 `Kt=0.049 N·m/A` 的尺度恢复到合理磁链量级，不继续使用仅用于诊断的半值 `0.00325Wb`。
+
+验证：
+
+```text
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 build
+结果：成功
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\vscode-build.ps1 flash
+结果：成功，ST-LINK 下载并复位
+```
+
+下一步现场测试：保持 12V 限流，先测 `cap=45Hz`，观察 OLED 的 `ekf:` 是否相比上一版的 `+27Hz` 更接近 `ol=45Hz`，停机后导出 trace。
+
+## 48. 确认版参数 + EKF 增益修复后 45Hz 导出
+
+用户测试停机后导出：
+
+```text
+Trace CSV: build/trace_diag_45hz_confirmed_params_ekf_fix_beta_flip.csv
+samples = 1364
+period_ms = 40
+wrapped = 0
+active = 0
+```
+
+稳定区间筛选条件为 `44.5Hz <= ol <= 45.5Hz` 且 `diag_flags = 13`、`fault = 0`，共 613 条：
+
+```text
+ol 平均：44.996Hz
+EKF 平均：-43.107Hz，范围 -43.5Hz 到 -42.6Hz
+EKF/ol 平均：-0.958
+Iq_fb 平均：3.001A
+Id_fb 平均：3.001A
+Vbus 平均：11.586V
+Vq 平均：2.377V
+```
+
+阶段判断：
+
+- 和上一轮 `flux=0.00325Wb` 的 `EKF≈+27.3Hz` 相比，这次 EKF 幅值已经接近开环 45Hz，说明“半速问题”主要不是 beta 符号，而是电机参数和 EKF 增益计算共同造成。
+- 当前仍保持 beta 取反，所以结果为负向 `-43Hz`；用户判断“beta 的符号也不用倒过来”与 trace 一致。
+- 已把 `EKF_V_BETA_SIGN` 和 `EKF_I_BETA_SIGN` 从 `-1.0f` 恢复为 `+1.0f`，并重新 build/flash。
+
+下一步：复测 `cap=45Hz`，预期 OLED `ekf:` 应接近 `+43Hz` 到 `+45Hz`；如果成立，再继续 30Hz/60Hz 三点验证。
+
+## 49. beta 正常符号后三频点 EKF 复测
+
+恢复 `EKF_V_BETA_SIGN=+1.0f`、`EKF_I_BETA_SIGN=+1.0f` 后，用户依次测试 30Hz、45Hz、60Hz 并停机导出。
+
+导出文件：
+
+```text
+build/trace_diag_30hz_confirmed_params_ekf_fix_beta_normal.csv
+build/trace_diag_45hz_confirmed_params_ekf_fix_beta_normal.csv
+build/trace_diag_60hz_confirmed_params_ekf_fix_beta_normal.csv
+```
+
+稳定段统计：
+
+```text
+30Hz:
+  ol 平均：29.996Hz
+  EKF 平均：+29.207Hz，范围 +28.5Hz 到 +29.7Hz
+  EKF/ol：0.974
+  Iq/Id：2.999A / 3.000A
+  Vbus/Vq：11.627V / 1.791V
+
+45Hz:
+  ol 平均：44.996Hz
+  EKF 平均：+43.056Hz，范围 +42.3Hz 到 +43.7Hz
+  EKF/ol：0.957
+  Iq/Id：3.001A / 3.001A
+  Vbus/Vq：11.614V / 2.372V
+
+60Hz:
+  ol 平均：59.995Hz
+  EKF 平均：+56.932Hz，范围 +56.4Hz 到 +57.3Hz
+  EKF/ol：0.949
+  Iq/Id：2.998A / 2.998A
+  Vbus/Vq：11.437V / 2.975V
+```
+
+阶段结论：
+
+- beta 正常符号是正确方向；之前 beta 取反只是在旧参数和旧 EKF bug 下造成的误导性诊断。
+- EKF 半速问题已基本解决，根因组合为：`Rs/Ls/flux` 参数不匹配、电阻相间/单相换算错误、电感取值偏低，以及 EKF Kalman 增益计算覆盖 bug。
+- EKF/ol 随频率从 `0.974` 到 `0.949` 略微下降，仍有约 `3-5%` 的模型误差。可能来自单一 `Ls` 无法表示 `Ld/Lq`、电压模型/死区压降、母线电压采样误差或磁链微调。
+- 电流环状态健康：三频点 `Iq/Id≈3A` 均稳定，Vq 随频率上升，符合预期。
+- 下一阶段可以开始做“谨慎闭环接管”：先在 45Hz 稳定开环时观察 EKF 角度与开环角度差，再加入角度渐变混合，不要直接硬切到 EKF。
